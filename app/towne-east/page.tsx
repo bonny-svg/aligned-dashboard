@@ -603,7 +603,6 @@ export default function TowneEastPage() {
               <CardContent className="space-y-4">
                 {RENO_SCOPES.map((scope) => {
                   const pct = Math.round((scope.spent / scope.budget) * 100);
-                  const unitPct = Math.round((scope.unitsDone / scope.unitsTotal) * 100);
                   return (
                     <div key={scope.scope}>
                       <div className="flex items-center justify-between mb-1">
