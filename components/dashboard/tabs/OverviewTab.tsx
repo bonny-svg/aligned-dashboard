@@ -1,7 +1,7 @@
 "use client";
 
 import { useAppState } from "@/lib/store";
-import { formatCurrency, formatPct, occupancyBg, statusColor } from "@/lib/utils";
+import { formatCurrency, formatPct, statusColor, computePropertyFinancials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -18,76 +18,223 @@ interface Props {
   propertyId: string;
 }
 
+const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function monthLabel(ym: string): string {
+  const [yr, mo] = ym.split("-");
+  return `${MONTH_ABBR[parseInt(mo) - 1]} ${yr}`;
+}
+
 export default function OverviewTab({ propertyId }: Props) {
   const { state } = useAppState();
   const property = state.properties.find((p) => p.id === propertyId);
   if (!property) return null;
 
-  const trend = state.occupancyTrend
-    .filter((t) => t.propertyId === propertyId)
-    .sort((a, b) => a.month.localeCompare(b.month))
-    .map((t) => ({ month: t.month.slice(5), pct: parseFloat(t.occupancyPct.toFixed(1)) }));
-
-  const delinquency = state.delinquency.filter((d) => d.propertyId === propertyId);
-  const totalDelinq = delinquency.reduce((s, d) => s + d.balance, 0);
-  const openWOs = state.workOrders.filter(
-    (w) => w.propertyId === propertyId && w.status !== "Completed"
+  // ── Occupancy from rent roll ──────────────────────────────────────────────
+  const propertyRentRoll = state.rentRoll.filter((r) => r.propertyId === propertyId);
+  const hasRentRoll = propertyRentRoll.length > 0;
+  const occupiedCount = propertyRentRoll.filter(
+    (r) => r.status === "Occupied" || r.status === "Notice" || r.status === "Eviction"
   ).length;
-  const capExItems = state.capEx.filter((c) => c.propertyId === propertyId);
-  const capExBudget = capExItems.reduce((s, c) => s + c.budget, 0);
-  const capExSpent = capExItems.reduce((s, c) => s + c.spent, 0);
+  const currentOccupancy = hasRentRoll
+    ? (occupiedCount / propertyRentRoll.length) * 100
+    : property.occupancyPct;
 
-  const occBg = occupancyBg(property.occupancyPct);
+  // ── Occupancy trend ───────────────────────────────────────────────────────
+  const today = new Date();
+  const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+
+  const importedPoints = state.occupancyTrend
+    .filter((t) => t.propertyId === propertyId && t.fromImport)
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  const trend: { month: string; pct: number }[] =
+    importedPoints.length > 0
+      ? importedPoints.map((t) => ({
+          month: monthLabel(t.month),
+          pct: parseFloat(
+            (t.month === currentMonth ? currentOccupancy : t.occupancyPct).toFixed(1)
+          ),
+        }))
+      : hasRentRoll
+      ? [{ month: monthLabel(currentMonth), pct: parseFloat(currentOccupancy.toFixed(1)) }]
+      : [];
+
+  const isSinglePoint = trend.length === 1;
+
+  // ── Financial metrics from latest month ───────────────────────────────────
+  const { noi, month: finMonth } = computePropertyFinancials(state.financials, propertyId);
+
+  const propFins = state.financials.filter((f) => f.propertyId === propertyId);
+  const latestItems = finMonth ? propFins.filter((f) => f.month === finMonth && !f.isNOI) : [];
+
+  const totalIncomeActual   = latestItems.filter((f) => f.category === "Income").reduce((s, f) => s + f.actual, 0);
+  const totalExpensesActual = latestItems.filter((f) => f.category === "Expenses").reduce((s, f) => s + f.actual, 0);
+  const totalDebtService    = latestItems.filter((f) => f.category === "Debt Service").reduce((s, f) => s + f.actual, 0);
+
+  // Expense ratio: Operating Expenses / EGI
+  const expenseRatio = totalIncomeActual > 0 ? (totalExpensesActual / totalIncomeActual) * 100 : null;
+  // DSCR: NOI / Debt Service
+  const dscr = totalDebtService > 0 ? noi / totalDebtService : null;
+
+  // ── Delinquency %  ────────────────────────────────────────────────────────
+  const delinqPct = property.delinquencyPct;
+
+  // ── Status colors ─────────────────────────────────────────────────────────
   const statColor = statusColor(property.status);
+
+  // ── Occupancy color ───────────────────────────────────────────────────────
+  const occColor = currentOccupancy >= 93 ? "text-green-700" : currentOccupancy >= 85 ? "text-amber-600" : "text-red-600";
 
   return (
     <div className="space-y-6">
-      {/* Stats row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: "Occupancy", value: formatPct(property.occupancyPct), extra: <Badge className={`${occBg} border text-xs mt-1`}>{property.occupancyPct >= 93 ? "On Target" : property.occupancyPct >= 85 ? "Below Goal" : "Critical"}</Badge> },
-          { label: "Collected MTD", value: formatCurrency(property.collectedMTD) },
-          { label: "Total Delinquency", value: formatCurrency(totalDelinq), sub: `${delinquency.length} tenants` },
-          { label: "Open Work Orders", value: openWOs.toString(), sub: `${formatCurrency(capExSpent)} / ${formatCurrency(capExBudget)} CapEx` },
-        ].map((s) => (
-          <Card key={s.label}>
-            <CardContent className="pt-4">
-              <p className="text-xs text-gray-500 font-medium">{s.label}</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{s.value}</p>
-              {s.sub && <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>}
-              {s.extra}
-            </CardContent>
-          </Card>
-        ))}
+
+      {/* ── 5-Metric KPI Row ───────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+
+        {/* 1 · Occupancy */}
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Occupancy</p>
+            <p className={`text-2xl font-bold mt-1 ${occColor}`}>
+              {formatPct(currentOccupancy)}
+            </p>
+            {property.occupancyBudget != null ? (
+              <>
+                <p className="text-xs text-gray-400 mt-1.5">Bgt {formatPct(property.occupancyBudget)}</p>
+                <p className={`text-xs font-semibold mt-0.5 ${currentOccupancy >= property.occupancyBudget ? "text-green-600" : "text-red-500"}`}>
+                  {(currentOccupancy - property.occupancyBudget) >= 0 ? "+" : ""}
+                  {(currentOccupancy - property.occupancyBudget).toFixed(1)}pp
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-gray-300 mt-1.5">—</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 2 · NOI */}
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NOI</p>
+            <p className={`text-2xl font-bold mt-1 ${!finMonth ? "text-gray-400" : noi >= 0 ? "text-gray-900" : "text-red-600"}`}>
+              {finMonth ? formatCurrency(noi) : "—"}
+            </p>
+            {finMonth && property.noiBudget != null ? (
+              <>
+                <p className="text-xs text-gray-400 mt-1.5">Bgt {formatCurrency(property.noiBudget)}</p>
+                <p className={`text-xs font-semibold mt-0.5 ${noi >= property.noiBudget ? "text-green-600" : "text-red-500"}`}>
+                  {noi >= property.noiBudget ? "+" : ""}{formatCurrency(noi - property.noiBudget)}
+                </p>
+              </>
+            ) : finMonth ? (
+              <p className="text-xs text-gray-300 mt-1.5">—</p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-1.5">Upload financials</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 3 · Delinquency % */}
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Delinquency %</p>
+            <p className={`text-2xl font-bold mt-1 ${
+              property.delinquencyBudget != null
+                ? delinqPct <= property.delinquencyBudget ? "text-green-700" : "text-red-600"
+                : delinqPct < 3 ? "text-green-700" : delinqPct < 6 ? "text-amber-600" : "text-red-600"
+            }`}>
+              {formatPct(delinqPct)}
+            </p>
+            {property.delinquencyBudget != null ? (
+              <>
+                <p className="text-xs text-gray-400 mt-1.5">Bgt {formatPct(property.delinquencyBudget)}</p>
+                <p className={`text-xs font-semibold mt-0.5 ${delinqPct <= property.delinquencyBudget ? "text-green-600" : "text-red-500"}`}>
+                  {(delinqPct - property.delinquencyBudget) >= 0 ? "+" : ""}
+                  {(delinqPct - property.delinquencyBudget).toFixed(1)}pp
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-gray-300 mt-1.5">—</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 4 · Expense Ratio */}
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Expense Ratio</p>
+            <p className={`text-2xl font-bold mt-1 ${
+              expenseRatio == null ? "text-gray-400"
+                : expenseRatio < 50 ? "text-green-700"
+                : "text-red-600"
+            }`}>
+              {expenseRatio != null ? formatPct(expenseRatio) : "—"}
+            </p>
+            <p className="text-xs text-gray-400 mt-1.5" title="Operating Expenses / EGI">
+              Oper. Expenses / EGI
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* 5 · DSCR */}
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">DSCR</p>
+            <p className={`text-2xl font-bold mt-1 ${
+              dscr == null ? "text-gray-400"
+                : dscr >= 1.25 ? "text-green-700"
+                : dscr >= 1.0  ? "text-amber-600"
+                : "text-red-600"
+            }`}>
+              {dscr != null ? `${dscr.toFixed(2)}x` : "—"}
+            </p>
+            <p className="text-xs text-gray-400 mt-1.5" title="NOI / Debt Service">
+              {dscr != null ? "NOI / Debt Service" : "Upload T12 to calculate"}
+            </p>
+          </CardContent>
+        </Card>
+
       </div>
 
       {/* Occupancy trend chart */}
       <Card>
         <CardHeader>
-          <CardTitle>Occupancy Trend (Last 7 Months)</CardTitle>
+          <CardTitle>Occupancy Trend</CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={trend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="occGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis domain={[70, 100]} tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} />
-              <Tooltip formatter={(v) => [`${v}%`, "Occupancy"]} />
-              <Area
-                type="monotone"
-                dataKey="pct"
-                stroke="#3b82f6"
-                strokeWidth={2}
-                fill="url(#occGradient)"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          {trend.length === 0 ? (
+            <div className="flex items-center justify-center h-[200px] text-sm text-gray-400">
+              No rent roll data uploaded yet.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={trend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="occGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis domain={[70, 100]} tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} />
+                <Tooltip formatter={(v) => [`${v}%`, "Occupancy"]} />
+                <Area
+                  type="monotone"
+                  dataKey="pct"
+                  stroke="#3b82f6"
+                  strokeWidth={isSinglePoint ? 0 : 2}
+                  fill={isSinglePoint ? "none" : "url(#occGradient)"}
+                  dot={{ r: 6, fill: "#3b82f6", strokeWidth: 2, stroke: "#fff" }}
+                  activeDot={{ r: 7 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+          <p className="text-xs text-gray-400 mt-3 text-center">
+            Upload monthly rent rolls to build a trend over time.
+          </p>
         </CardContent>
       </Card>
 

@@ -334,6 +334,12 @@ export default function TowneEastPage() {
   const delinqActualPct  = delinqItem ? (Math.abs(delinqItem.actual)  / gpr) * 100 : 0;
   const delinqBudgetPct  = delinqItem ? (Math.abs(delinqItem.budget) / gpr) * 100 : 0;
 
+  const debtServiceActual = belowLine
+    .filter((r) => r.label.toLowerCase().includes("debt service"))
+    .reduce((s, r) => s + r.actual, 0);
+  const dscr             = debtServiceActual > 0 ? noi.actual / debtServiceActual : null;
+  const expenseRatio     = egi.actual > 0 ? (expensesSum.actual / egi.actual) * 100 : null;
+
   const totalDelinquent  = DELINQUENCY.reduce((s, d) => s + d.balance, 0);
   const total30plus      = DELINQUENCY.reduce((s, d) => s + d.aging30plus, 0);
   const totalRenoSpent   = RENO_SCOPES.reduce((s, r) => s + r.spent, 0);
@@ -417,55 +423,86 @@ export default function TowneEastPage() {
             })}
           </div>
 
-          {/* KPI cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-            {/* 1 · Net Income */}
-            <Card className="border-gray-200">
-              <CardContent className="pt-4 pb-3">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Net Income</p>
-                <p className={cn("text-2xl font-bold mt-1", ncf.actual >= 0 ? "text-gray-900" : "text-red-600")}>
-                  {fmt(ncf.actual)}
-                </p>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <span className="text-xs text-gray-400">Bgt {fmt(ncf.budget)}</span>
-                  <span className={cn("text-xs font-medium", varColor(ncf.actual - ncf.budget, false))}>
-                    {varStr(ncf.actual - ncf.budget)}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
+          {/* KPI cards — 5 metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
 
-            {/* 2 · Occupancy */}
+            {/* 1 · Occupancy */}
             <Card className="border-gray-200">
               <CardContent className="pt-4 pb-3">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Occupancy</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Occupancy</p>
                 <p className={cn("text-2xl font-bold mt-1", occupancy.actual >= occupancy.budget ? "text-emerald-600" : "text-amber-600")}>
                   {occupancy.actual.toFixed(1)}%
                 </p>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <span className="text-xs text-gray-400">Bgt {occupancy.budget.toFixed(1)}%</span>
-                  <span className={cn("text-xs font-medium", (occupancy.actual - occupancy.budget) >= 0 ? "text-emerald-600" : "text-red-500")}>
-                    {(occupancy.actual - occupancy.budget) >= 0 ? "+" : ""}{(occupancy.actual - occupancy.budget).toFixed(1)}pp
-                  </span>
-                </div>
+                <p className="text-xs text-gray-400 mt-1.5">Bgt {occupancy.budget.toFixed(1)}%</p>
+                <p className={cn("text-xs font-semibold mt-0.5", (occupancy.actual - occupancy.budget) >= 0 ? "text-emerald-600" : "text-red-500")}>
+                  {(occupancy.actual - occupancy.budget) >= 0 ? "+" : ""}{(occupancy.actual - occupancy.budget).toFixed(1)}pp
+                </p>
               </CardContent>
             </Card>
 
-            {/* 3 · Delinquency % */}
+            {/* 2 · NOI */}
             <Card className="border-gray-200">
               <CardContent className="pt-4 pb-3">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Delinquency % of GPR</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NOI</p>
+                <p className={cn("text-2xl font-bold mt-1", noi.actual >= 0 ? "text-gray-900" : "text-red-600")}>
+                  {fmt(noi.actual)}
+                </p>
+                <p className="text-xs text-gray-400 mt-1.5">Bgt {fmt(noi.budget)}</p>
+                <p className={cn("text-xs font-semibold mt-0.5", varColor(noi.actual - noi.budget, false))}>
+                  {varStr(noi.actual - noi.budget)}
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* 3 · Delinquency % of GPR */}
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Delinquency %</p>
                 <p className={cn("text-2xl font-bold mt-1", delinqActualPct <= delinqBudgetPct ? "text-emerald-600" : "text-red-600")}>
                   {delinqActualPct.toFixed(1)}%
                 </p>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <span className="text-xs text-gray-400">Bgt {delinqBudgetPct.toFixed(1)}%</span>
-                  <span className={cn("text-xs font-medium", (delinqActualPct - delinqBudgetPct) <= 0 ? "text-emerald-600" : "text-red-500")}>
-                    {(delinqActualPct - delinqBudgetPct) >= 0 ? "+" : ""}{(delinqActualPct - delinqBudgetPct).toFixed(1)}pp
-                  </span>
-                </div>
+                <p className="text-xs text-gray-400 mt-1.5">Bgt {delinqBudgetPct.toFixed(1)}%</p>
+                <p className={cn("text-xs font-semibold mt-0.5", (delinqActualPct - delinqBudgetPct) <= 0 ? "text-emerald-600" : "text-red-500")}>
+                  {(delinqActualPct - delinqBudgetPct) >= 0 ? "+" : ""}{(delinqActualPct - delinqBudgetPct).toFixed(1)}pp
+                </p>
               </CardContent>
             </Card>
+
+            {/* 4 · Expense Ratio */}
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Expense Ratio</p>
+                <p className={cn("text-2xl font-bold mt-1",
+                  expenseRatio == null ? "text-gray-400"
+                    : expenseRatio < 50  ? "text-emerald-600"
+                    : "text-red-600"
+                )}>
+                  {expenseRatio != null ? `${expenseRatio.toFixed(1)}%` : "—"}
+                </p>
+                <p className="text-xs text-gray-400 mt-1.5" title="Operating Expenses / EGI">
+                  Oper. Expenses / EGI
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* 5 · DSCR */}
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">DSCR</p>
+                <p className={cn("text-2xl font-bold mt-1",
+                  dscr == null ? "text-gray-400"
+                    : dscr >= 1.25 ? "text-emerald-600"
+                    : dscr >= 1.0  ? "text-amber-600"
+                    : "text-red-600"
+                )}>
+                  {dscr != null ? `${dscr.toFixed(2)}x` : "—"}
+                </p>
+                <p className="text-xs text-gray-400 mt-1.5" title="NOI / Debt Service">
+                  NOI / Debt Service
+                </p>
+              </CardContent>
+            </Card>
+
           </div>
 
           {/* Financials table */}

@@ -20,8 +20,9 @@ export interface Property {
   platform: Platform;
   platformAccount: string; // e.g. "G&C", "B", "TX-East"
   lastImport?: string;
-  noiBudget?: number;       // monthly NOI budget for KPI comparison
-  occupancyBudget?: number; // occupancy % budget target
+  noiBudget?: number;          // monthly NOI budget for KPI comparison
+  occupancyBudget?: number;    // occupancy % budget target
+  delinquencyBudget?: number;  // delinquency % of GPR budget target
 }
 
 // ─── Column mapping (CSV import) ─────────────────────────────────────────────
