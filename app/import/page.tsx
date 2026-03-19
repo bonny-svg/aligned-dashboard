@@ -529,21 +529,35 @@ export default function ImportPage() {
 
       // ── Recalculate property stats ────────────────────────────────────
       const property = prev.properties.find((p) => p.id === targetPropertyId);
+      const propRentRoll  = newRentRoll.filter((r) => r.propertyId === targetPropertyId);
+      const propDelinquency = newDelinquency.filter((d) => d.propertyId === targetPropertyId);
+      const propStats = property ? recalcPropertyStats(property, propRentRoll, propDelinquency) : null;
+
       const updatedProperties = property
         ? prev.properties.map((p) =>
             p.id === targetPropertyId
-              ? {
-                  ...p,
-                  ...recalcPropertyStats(
-                    p,
-                    newRentRoll.filter((r) => r.propertyId === targetPropertyId),
-                    newDelinquency.filter((d) => d.propertyId === targetPropertyId)
-                  ),
-                  lastImport: new Date().toISOString(),
-                }
+              ? { ...p, ...propStats, lastImport: new Date().toISOString() }
               : p
           )
         : prev.properties;
+
+      // ── Update occupancy trend (rent roll imports only) ───────────────
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const newOccupancyTrend =
+        pending.fileType === "Rent Roll" && propStats
+          ? [
+              ...prev.occupancyTrend.filter(
+                (t) => !(t.propertyId === targetPropertyId && t.month === currentMonth)
+              ),
+              {
+                propertyId: targetPropertyId,
+                month: currentMonth,
+                occupancyPct: propStats.occupancyPct,
+                fromImport: true as const,
+              },
+            ]
+          : prev.occupancyTrend;
 
       // ── Update import log ─────────────────────────────────────────────
       const newLog = [
@@ -570,6 +584,7 @@ export default function ImportPage() {
         rentRoll: newRentRoll,
         delinquency: newDelinquency,
         financials: newFinancials,
+        occupancyTrend: newOccupancyTrend,
         importLog: newLog,
       };
     });
