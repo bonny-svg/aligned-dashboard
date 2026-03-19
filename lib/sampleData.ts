@@ -81,6 +81,8 @@ export const SAMPLE_PROPERTIES: Property[] = [
     platform: "AppFolio",
     platformAccount: "G&C",
     lastImport: "2026-03-14T11:15:00Z",
+    noiBudget: 28873,
+    occupancyBudget: 95.0,
   },
   {
     id: "hall-street",
@@ -96,6 +98,8 @@ export const SAMPLE_PROPERTIES: Property[] = [
     platform: "AppFolio",
     platformAccount: "B",
     lastImport: "2026-03-15T08:30:00Z",
+    noiBudget: 28222,
+    occupancyBudget: 95.0,
   },
   {
     id: "the-grove",
@@ -204,28 +208,102 @@ function buildFinancials(propertyId: string, gpri: number, noi: number): Financi
     const variance = 0.97 + rand() * 0.06;
     const expenseBase = gpri * 0.52;
     items.push(
-      { propertyId, month, category: "Income",   lineItem: "Gross Potential Rent",   underwriting: gpri,              budget: gpri,              actual: Math.round(gpri * variance),                           isNOI: false },
-      { propertyId, month, category: "Income",   lineItem: "Vacancy Loss",            underwriting: -gpri * 0.06,      budget: -gpri * 0.06,      actual: Math.round(-gpri * (0.04 + rand() * 0.04)),            isNOI: false },
-      { propertyId, month, category: "Income",   lineItem: "Other Income",            underwriting: gpri * 0.04,       budget: gpri * 0.04,       actual: Math.round(gpri * (0.03 + rand() * 0.02)),             isNOI: false },
-      { propertyId, month, category: "Expenses", lineItem: "Management Fee",          underwriting: -gpri * 0.08,      budget: -gpri * 0.08,      actual: Math.round(-gpri * 0.08),                              isNOI: false },
-      { propertyId, month, category: "Expenses", lineItem: "Repairs & Maintenance",   underwriting: -expenseBase * 0.18, budget: -expenseBase * 0.18, actual: Math.round(-expenseBase * (0.14 + rand() * 0.08)), isNOI: false },
-      { propertyId, month, category: "Expenses", lineItem: "Utilities",               underwriting: -expenseBase * 0.12, budget: -expenseBase * 0.12, actual: Math.round(-expenseBase * (0.10 + rand() * 0.04)), isNOI: false },
-      { propertyId, month, category: "Expenses", lineItem: "Insurance",               underwriting: -expenseBase * 0.08, budget: -expenseBase * 0.08, actual: Math.round(-expenseBase * 0.08),                   isNOI: false },
-      { propertyId, month, category: "Expenses", lineItem: "Property Tax",            underwriting: -expenseBase * 0.14, budget: -expenseBase * 0.14, actual: Math.round(-expenseBase * 0.14),                   isNOI: false },
-      { propertyId, month, category: "Expenses", lineItem: "Admin & Legal",           underwriting: -expenseBase * 0.05, budget: -expenseBase * 0.05, actual: Math.round(-expenseBase * (0.04 + rand() * 0.03)), isNOI: false },
-      { propertyId, month, category: "NOI",      lineItem: "Net Operating Income",    underwriting: noi,               budget: noi,               actual: Math.round(noi * (0.93 + rand() * 0.10)),             isNOI: true  },
+      { propertyId, month, category: "Income",   lineItem: "Gross Potential Rent",   underwriting: gpri,             budget: gpri,             actual: Math.round(gpri * variance)                            },
+      { propertyId, month, category: "Income",   lineItem: "Vacancy Loss",            underwriting: -gpri * 0.06,     budget: -gpri * 0.06,     actual: Math.round(-gpri * (0.04 + rand() * 0.04))             },
+      { propertyId, month, category: "Income",   lineItem: "Other Income",            underwriting: gpri * 0.04,      budget: gpri * 0.04,      actual: Math.round(gpri * (0.03 + rand() * 0.02))              },
+      { propertyId, month, category: "Expenses", lineItem: "Management Fee",          underwriting: gpri * 0.08,      budget: gpri * 0.08,      actual: Math.round(gpri * 0.08)                                },
+      { propertyId, month, category: "Expenses", lineItem: "Repairs & Maintenance",   underwriting: expenseBase * 0.18, budget: expenseBase * 0.18, actual: Math.round(expenseBase * (0.14 + rand() * 0.08))  },
+      { propertyId, month, category: "Expenses", lineItem: "Utilities",               underwriting: expenseBase * 0.12, budget: expenseBase * 0.12, actual: Math.round(expenseBase * (0.10 + rand() * 0.04))  },
+      { propertyId, month, category: "Expenses", lineItem: "Insurance",               underwriting: expenseBase * 0.08, budget: expenseBase * 0.08, actual: Math.round(expenseBase * 0.08)                    },
+      { propertyId, month, category: "Expenses", lineItem: "Property Tax",            underwriting: expenseBase * 0.14, budget: expenseBase * 0.14, actual: Math.round(expenseBase * 0.14)                    },
+      { propertyId, month, category: "Expenses", lineItem: "Admin & Legal",           underwriting: expenseBase * 0.05, budget: expenseBase * 0.05, actual: Math.round(expenseBase * (0.04 + rand() * 0.03)) },
+      { propertyId, month, category: "NOI",      lineItem: "Net Operating Income",    underwriting: noi,              budget: noi,              actual: Math.round(noi * (0.93 + rand() * 0.10)),             isNOI: true  },
     );
   }
   return items;
 }
 
+// ─── Explicit 2026 budget financials (Woodland Terrace & Hall Street Court) ───
+
+const rand2 = makePRNG(0xcafe1234);
+
+function budgetItems(
+  pid: string,
+  month: string,
+  gpr: number,
+  vacLoss: number,
+  otherIncome: number,
+  mgmtFee: number,
+  rm: number,
+  util: number,
+  ins: number,
+  propTax: number,
+  admin: number,
+  noi: number,
+  hasActuals: boolean,
+): FinancialLineItem[] {
+  const v  = hasActuals ? 0.97 + rand2() * 0.06 : 1;
+  const ve = hasActuals ? 0.97 + rand2() * 0.06 : 1;
+  const bo = !hasActuals;
+  return [
+    { propertyId: pid, month, category: "Income",   lineItem: "Gross Potential Rent",  underwriting: gpr,       budget: gpr,       actual: hasActuals ? Math.round(gpr * v)  : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Income",   lineItem: "Vacancy Loss",           underwriting: vacLoss,   budget: vacLoss,   actual: hasActuals ? Math.round(vacLoss * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Income",   lineItem: "Other Income",           underwriting: otherIncome, budget: otherIncome, actual: hasActuals ? Math.round(otherIncome * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Management Fee",         underwriting: mgmtFee,   budget: mgmtFee,   actual: hasActuals ? Math.round(mgmtFee * ve) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Repairs & Maintenance",  underwriting: rm,        budget: rm,        actual: hasActuals ? Math.round(rm * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Utilities",              underwriting: util,      budget: util,      actual: hasActuals ? Math.round(util * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Insurance",              underwriting: ins,       budget: ins,       actual: hasActuals ? Math.round(ins * 1.0) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Property Tax",           underwriting: propTax,   budget: propTax,   actual: hasActuals ? Math.round(propTax * 1.0) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Admin & Legal",          underwriting: admin,     budget: admin,     actual: hasActuals ? Math.round(admin * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "NOI",      lineItem: "Net Operating Income",   underwriting: noi,       budget: noi,       actual: hasActuals ? Math.round(noi * (0.93 + rand2() * 0.10)) : 0, isNOI: true, budgetOnly: bo },
+  ];
+}
+
+function buildWoodlandTerraceFinancials(): FinancialLineItem[] {
+  const pid = "woodland-terrace";
+  // Jan–Jul: EGI=61,639, Expenses=32,766, NOI=28,873
+  const jj = { gpr: 62897, vac: -3774, oi: 2516, mf: 5032, rm: 8073, ut: 5000, ins: 3200, pt: 7000, ad: 4461, noi: 28873 };
+  // Aug–Dec: EGI=63,488, Expenses=33,417, NOI=30,071
+  const ad = { gpr: 64784, vac: -3887, oi: 2591, mf: 5183, rm: 8243, ut: 5100, ins: 3267, pt: 7141, ad: 4483, noi: 30071 };
+  return [
+    // Jan–Mar: budgets + PRNG actuals
+    ...["2026-01","2026-02","2026-03"].flatMap((m) =>
+      budgetItems(pid, m, jj.gpr, jj.vac, jj.oi, jj.mf, jj.rm, jj.ut, jj.ins, jj.pt, jj.ad, jj.noi, true)
+    ),
+    // Apr–Jul: budget only
+    ...["2026-04","2026-05","2026-06","2026-07"].flatMap((m) =>
+      budgetItems(pid, m, jj.gpr, jj.vac, jj.oi, jj.mf, jj.rm, jj.ut, jj.ins, jj.pt, jj.ad, jj.noi, false)
+    ),
+    // Aug–Dec: budget only
+    ...["2026-08","2026-09","2026-10","2026-11","2026-12"].flatMap((m) =>
+      budgetItems(pid, m, ad.gpr, ad.vac, ad.oi, ad.mf, ad.rm, ad.ut, ad.ins, ad.pt, ad.ad, ad.noi, false)
+    ),
+  ];
+}
+
+function buildHallStreetFinancials(): FinancialLineItem[] {
+  const pid = "hall-street";
+  // All months: EGI=40,724, Expenses=12,502, NOI=28,222
+  const b = { gpr: 41555, vac: -2493, oi: 1662, mf: 3324, rm: 2500, ut: 1800, ins: 1200, pt: 2500, ad: 1178, noi: 28222 };
+  return [
+    // Jan–Mar: budgets + PRNG actuals
+    ...["2026-01","2026-02","2026-03"].flatMap((m) =>
+      budgetItems(pid, m, b.gpr, b.vac, b.oi, b.mf, b.rm, b.ut, b.ins, b.pt, b.ad, b.noi, true)
+    ),
+    // Apr–Dec: budget only
+    ...["2026-04","2026-05","2026-06","2026-07","2026-08","2026-09","2026-10","2026-11","2026-12"].flatMap((m) =>
+      budgetItems(pid, m, b.gpr, b.vac, b.oi, b.mf, b.rm, b.ut, b.ins, b.pt, b.ad, b.noi, false)
+    ),
+  ];
+}
+
 const FINANCIALS: FinancialLineItem[] = [
-  ...buildFinancials("towne-east",       92500,  38000),
-  ...buildFinancials("woodhaven",        28800,  11200),
-  ...buildFinancials("north-park",       62400,  24800),
-  ...buildFinancials("woodland-terrace", 44400,  17600),
-  ...buildFinancials("hall-street",      29800,  13200),
-  ...buildFinancials("the-grove",       345600, 148000),
+  ...buildFinancials("towne-east",  92500,  38000),
+  ...buildFinancials("woodhaven",   28800,  11200),
+  ...buildFinancials("north-park",  62400,  24800),
+  ...buildWoodlandTerraceFinancials(),
+  ...buildHallStreetFinancials(),
+  ...buildFinancials("the-grove",  345600, 148000),
 ];
 
 // ─── Work Orders ──────────────────────────────────────────────────────────────

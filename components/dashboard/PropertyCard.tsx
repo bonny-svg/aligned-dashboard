@@ -75,6 +75,11 @@ export default function PropertyCard({ property: p }: Props) {
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${occBg}`}>
               {formatPct(p.occupancyPct)}
             </span>
+            {p.occupancyBudget != null && (
+              <p className={`text-xs mt-0.5 ${p.occupancyPct >= p.occupancyBudget ? "text-green-600" : "text-amber-600"}`}>
+                vs {formatPct(p.occupancyBudget)}
+              </p>
+            )}
           </div>
           <div className="text-center">
             <p className="text-xs text-gray-500 mb-0.5">Collected MTD</p>
@@ -101,6 +106,11 @@ export default function PropertyCard({ property: p }: Props) {
               <p className={`text-sm font-bold ${noi >= 0 ? "text-green-700" : "text-red-600"}`}>
                 {formatCurrency(noi)}
               </p>
+              {p.noiBudget != null && (
+                <p className={`text-xs mt-0.5 ${noi >= p.noiBudget ? "text-green-600" : "text-red-600"}`}>
+                  vs {formatCurrency(p.noiBudget)} budget
+                </p>
+              )}
             </div>
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-0.5">Cash Flow</p>

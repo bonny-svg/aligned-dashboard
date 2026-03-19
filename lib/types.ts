@@ -20,6 +20,8 @@ export interface Property {
   platform: Platform;
   platformAccount: string; // e.g. "G&C", "B", "TX-East"
   lastImport?: string;
+  noiBudget?: number;       // monthly NOI budget for KPI comparison
+  occupancyBudget?: number; // occupancy % budget target
 }
 
 // ─── Column mapping (CSV import) ─────────────────────────────────────────────
@@ -177,6 +179,7 @@ export interface FinancialLineItem {
   isNetCashFlow?: boolean;
   accountNumber?: string;
   variance?: number;
+  budgetOnly?: boolean; // true = no actuals yet, show "—" for actual/variance
 }
 
 export interface WorkOrder {
@@ -202,6 +205,8 @@ export interface OccupancyTrend {
   propertyId: string;
   month: string;
   occupancyPct: number;
+  /** true = entry was written from a real rent roll import; false/absent = sample/placeholder data */
+  fromImport?: boolean;
 }
 
 export interface AppState {

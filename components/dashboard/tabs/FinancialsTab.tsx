@@ -21,15 +21,19 @@ function aggActual(items: { category: string; actual: number }[], cat: string): 
   return items.filter((f) => f.category === cat).reduce((s, f) => s + f.actual, 0);
 }
 
+function aggBudget(items: { category: string; budget: number }[], cat: string): number {
+  return items.filter((f) => f.category === cat).reduce((s, f) => s + f.budget, 0);
+}
+
 export default function FinancialsTab({ propertyId }: Props) {
   const { state } = useAppState();
 
   const allFinancials = state.financials.filter((f) => f.propertyId === propertyId);
 
-  // Available months — derived from non-zero income/expense actuals, desc
+  // Include months that have either actuals OR budgets
   const months = Array.from(new Set(
     allFinancials
-      .filter((f) => !f.isNOI && f.actual !== 0)
+      .filter((f) => !f.isNOI && (f.actual !== 0 || f.budget !== 0))
       .map((f) => f.month)
   )).sort((a, b) => b.localeCompare(a));
 
@@ -37,12 +41,14 @@ export default function FinancialsTab({ propertyId }: Props) {
 
   const items = allFinancials.filter((f) => f.month === month && !f.isNOI);
 
+  const isBudgetOnlyMonth = items.length > 0 && items.every((f) => f.budgetOnly);
+
   const incomeItems       = items.filter((f) => f.category === "Income");
   const expenseItems      = items.filter((f) => f.category === "Expenses");
   const capexItems        = items.filter((f) => f.category === "CapEx");
   const debtItems         = items.filter((f) => f.category === "Debt Service");
   const profFeeItems      = items.filter((f) => f.category === "Professional Fees");
-  const netIncomeItem    = items.find((f) => f.isNetCashFlow);
+  const netIncomeItem     = items.find((f) => f.isNetCashFlow);
 
   const totalIncome       = aggActual(items, "Income");
   const totalExpenses     = aggActual(items, "Expenses");
@@ -50,7 +56,11 @@ export default function FinancialsTab({ propertyId }: Props) {
   const totalDebt         = aggActual(items, "Debt Service");
   const totalProfFees     = aggActual(items, "Professional Fees");
 
+  const totalIncomeBudget   = aggBudget(items, "Income");
+  const totalExpensesBudget = aggBudget(items, "Expenses");
+
   const noi               = totalIncome - totalExpenses;
+  const noiBudgetCalc     = totalIncomeBudget - totalExpensesBudget;
   const cashFlow          = netIncomeItem
     ? netIncomeItem.actual
     : noi - totalCapex - totalDebt - totalProfFees;
@@ -61,7 +71,36 @@ export default function FinancialsTab({ propertyId }: Props) {
 
   const colSpan           = (hasBudget ? 4 : 2) + (hasVariance ? 1 : 0);
 
+  // KPI display values — use budget totals for budget-only months
+  const displayIncome   = isBudgetOnlyMonth ? totalIncomeBudget   : totalIncome;
+  const displayExpenses = isBudgetOnlyMonth ? totalExpensesBudget : totalExpenses;
+  const displayNOI      = isBudgetOnlyMonth ? noiBudgetCalc       : noi;
+  const displayCF       = isBudgetOnlyMonth ? noiBudgetCalc       : cashFlow;
+
   function renderLineItem(item: typeof items[0], isExpense = false) {
+    if (item.budgetOnly) {
+      return (
+        <tr
+          key={`${item.lineItem}-${item.accountNumber ?? item.month}`}
+          className="border-t border-gray-100 hover:bg-gray-50"
+        >
+          <td className="px-4 py-2 text-sm text-gray-700 pl-8">{item.lineItem}</td>
+          {hasBudget && (
+            <td className="px-4 py-2 text-sm text-right text-gray-500">
+              {item.budget !== 0 ? formatCurrency(item.budget) : "—"}
+            </td>
+          )}
+          <td className="px-4 py-2 text-sm text-right font-medium text-gray-400">—</td>
+          {hasBudget && (
+            <td className="px-4 py-2 text-sm text-right font-medium text-gray-300">—</td>
+          )}
+          {hasVariance && (
+            <td className="px-4 py-2 text-sm text-right font-medium text-gray-300">—</td>
+          )}
+        </tr>
+      );
+    }
+
     const varBudget = hasBudget && item.budget !== 0 ? item.actual - item.budget : null;
     const varGood   = isExpense ? (varBudget ?? 0) < 0 : (varBudget ?? 0) > 0;
 
@@ -118,13 +157,27 @@ export default function FinancialsTab({ propertyId }: Props) {
     );
   }
 
-  function renderSubtotal(label: string, total: number, isExpense = false) {
+  function renderSubtotal(label: string, actualTotal: number, isExpense = false, budgetTotal?: number) {
+    if (isBudgetOnlyMonth) {
+      return (
+        <tr className="bg-gray-50/80">
+          <td className="px-4 py-2 text-xs font-semibold text-gray-500 pl-8">{label}</td>
+          {hasBudget && (
+            <td className={`px-4 py-2 text-sm text-right font-bold ${isExpense ? "text-red-700" : "text-gray-900"}`}>
+              {budgetTotal !== undefined ? formatCurrency(budgetTotal) : "—"}
+            </td>
+          )}
+          <td className="px-4 py-2 text-sm text-right font-bold text-gray-400">—</td>
+          {hasBudget && <td />}
+        </tr>
+      );
+    }
     return (
       <tr className="bg-gray-50/80">
         <td className="px-4 py-2 text-xs font-semibold text-gray-500 pl-8">{label}</td>
         {hasBudget && <td />}
-        <td className={`px-4 py-2 text-sm text-right font-bold ${isExpense && total > 0 ? "text-red-700" : "text-gray-900"}`}>
-          {formatCurrency(total)}
+        <td className={`px-4 py-2 text-sm text-right font-bold ${isExpense && actualTotal > 0 ? "text-red-700" : "text-gray-900"}`}>
+          {formatCurrency(actualTotal)}
         </td>
         {hasBudget && <td />}
       </tr>
@@ -139,7 +192,10 @@ export default function FinancialsTab({ propertyId }: Props) {
           colSpan={colSpan}
           className="px-4 py-3 flex items-center justify-between"
         >
-          <span className="text-sm font-bold text-gray-900">{label}</span>
+          <span className="text-sm font-bold text-gray-900">
+            {label}
+            {isBudgetOnlyMonth && <span className="ml-1 text-xs font-normal text-gray-400">(Budget)</span>}
+          </span>
           <span className={`text-base font-bold ${color}`}>{formatCurrency(value)}</span>
         </td>
       </tr>
@@ -169,6 +225,9 @@ export default function FinancialsTab({ propertyId }: Props) {
             }`}
           >
             {monthLabel(m)}
+            {allFinancials.filter((f) => f.month === m && !f.isNOI).every((f) => f.budgetOnly) && (
+              <span className="ml-1 text-xs text-gray-400">(B)</span>
+            )}
           </button>
         ))}
       </div>
@@ -176,10 +235,10 @@ export default function FinancialsTab({ propertyId }: Props) {
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "Total Income",   value: formatCurrency(totalIncome),   color: "text-gray-900" },
-          { label: "Total Expenses", value: formatCurrency(totalExpenses), color: "text-gray-900" },
-          { label: "NOI",            value: formatCurrency(noi),           color: noi >= 0 ? "text-green-700" : "text-red-700" },
-          { label: "Net Cash Flow",  value: formatCurrency(cashFlow),      color: cashFlow >= 0 ? "text-green-700" : "text-red-700" },
+          { label: isBudgetOnlyMonth ? "Total Income (Budget)"   : "Total Income",   value: formatCurrency(displayIncome),   color: "text-gray-900" },
+          { label: isBudgetOnlyMonth ? "Total Expenses (Budget)" : "Total Expenses", value: formatCurrency(displayExpenses), color: "text-gray-900" },
+          { label: isBudgetOnlyMonth ? "NOI (Budget)"            : "NOI",            value: formatCurrency(displayNOI),      color: displayNOI >= 0 ? "text-green-700" : "text-red-700" },
+          { label: isBudgetOnlyMonth ? "Net Cash Flow (Budget)"  : "Net Cash Flow",  value: formatCurrency(displayCF),       color: displayCF >= 0 ? "text-green-700" : "text-red-700" },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4">
@@ -201,7 +260,9 @@ export default function FinancialsTab({ propertyId }: Props) {
                   {hasBudget && (
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Budget</th>
                   )}
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Actual</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    {isBudgetOnlyMonth ? <span className="text-gray-400">Actual</span> : "Actual"}
+                  </th>
                   {hasBudget && (
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Var vs Budget</th>
                   )}
@@ -214,15 +275,15 @@ export default function FinancialsTab({ propertyId }: Props) {
                 {/* ── INCOME ─────────────────────────────────── */}
                 {renderSectionHeader("Income", "bg-blue-50/60 text-blue-700")}
                 {incomeItems.map((item) => renderLineItem(item, false))}
-                {renderSubtotal("Total Operating Income", totalIncome, false)}
+                {renderSubtotal("Total Operating Income", totalIncome, false, totalIncomeBudget)}
 
                 {/* ── EXPENSES ───────────────────────────────── */}
                 {renderSectionHeader("Expenses", "bg-gray-50/60 text-gray-600")}
                 {expenseItems.map((item) => renderLineItem(item, true))}
-                {renderSubtotal("Total Operating Expenses", totalExpenses, true)}
+                {renderSubtotal("Total Operating Expenses", totalExpenses, true, totalExpensesBudget)}
 
                 {/* ── NOI ────────────────────────────────────── */}
-                {renderSummaryRow("NOI", noi, true)}
+                {renderSummaryRow("NOI", isBudgetOnlyMonth ? noiBudgetCalc : noi, true)}
 
                 {/* ── BELOW THE LINE ─────────────────────────── */}
                 {hasBelowLine && (
@@ -262,7 +323,7 @@ export default function FinancialsTab({ propertyId }: Props) {
                     )}
 
                     {/* ── NET CASH FLOW ───────────────────────── */}
-                    {renderSummaryRow("Net Cash Flow", cashFlow, false)}
+                    {renderSummaryRow("Net Cash Flow", isBudgetOnlyMonth ? noiBudgetCalc : cashFlow, false)}
                   </>
                 )}
               </tbody>
