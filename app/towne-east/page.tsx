@@ -167,7 +167,20 @@ const DELINQUENCY = [
   { tenant: "Marcus Hill",      unit: "317A", balance: 1_480, aging0_30: 1_480, aging30plus:     0, action: "None",          notes: null },
 ];
 
+// ─── OCCUPANCY DATA (per month) ───────────────────────────────────────────────
+const OCCUPANCY: Record<Month, { actual: number; budget: number }> = {
+  mar: { actual: 91.0, budget: 93.0 },
+  feb: { actual: 92.0, budget: 93.0 },
+  jan: { actual: 93.5, budget: 93.0 },
+};
+
 // ─── RENOVATIONS DATA ─────────────────────────────────────────────────────────
+const RENO_BY_TYPE = [
+  { type: "1 BD / 1 BA", budgetPerUnit:  5_000, avgActualPerUnit:  4_850, unitsDone:  8, unitsTotal: 15 },
+  { type: "2 BD / 1 BA", budgetPerUnit:  5_000, avgActualPerUnit:  5_120, unitsDone: 12, unitsTotal: 18 },
+  { type: "2 BD / 2 BA", budgetPerUnit: 11_000, avgActualPerUnit: 10_750, unitsDone:  5, unitsTotal:  7 },
+];
+
 const RENO_SCOPES = [
   { scope: "Kitchen Updates",     budget: 120_000, spent:  75_000, unitsTotal: 40, unitsDone: 25 },
   { scope: "Bathroom Refresh",    budget:  80_000, spent:  50_000, unitsTotal: 40, unitsDone: 25 },
@@ -315,6 +328,12 @@ export default function TowneEastPage() {
   const ncf = { actual: noi.actual - belowLineSum.actual, budget: noi.budget - belowLineSum.budget };
   const netCollections = { actual: collectionsSum.actual, budget: collectionsSum.budget };
 
+  const occupancy        = OCCUPANCY[month];
+  const gpr              = 89_000;
+  const delinqItem       = income.find((r) => r.label === "Delinquency");
+  const delinqActualPct  = delinqItem ? (Math.abs(delinqItem.actual)  / gpr) * 100 : 0;
+  const delinqBudgetPct  = delinqItem ? (Math.abs(delinqItem.budget) / gpr) * 100 : 0;
+
   const totalDelinquent  = DELINQUENCY.reduce((s, d) => s + d.balance, 0);
   const total30plus      = DELINQUENCY.reduce((s, d) => s + d.aging30plus, 0);
   const totalRenoSpent   = RENO_SCOPES.reduce((s, r) => s + r.spent, 0);
@@ -399,29 +418,54 @@ export default function TowneEastPage() {
           </div>
 
           {/* KPI cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {[
-              { label: "Eff. Gross Income", actual: egi.actual, budget: egi.budget },
-              { label: "Net Collections",   actual: netCollections.actual, budget: netCollections.budget },
-              { label: "NOI",               actual: noi.actual, budget: noi.budget },
-              { label: "Net Cash Flow",     actual: ncf.actual, budget: ncf.budget },
-            ].map(({ label, actual, budget }) => {
-              const variance = actual - budget;
-              return (
-                <Card key={label} className="border-gray-200">
-                  <CardContent className="pt-4 pb-3">
-                    <p className="text-xs font-medium text-gray-500">{label}</p>
-                    <p className={cn("text-xl font-bold mt-0.5", actual >= 0 ? "text-gray-900" : "text-red-600")}>
-                      {fmt(actual)}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Bgt {fmt(budget)}{" "}
-                      <span className={varColor(variance, false)}>{varStr(variance)}</span>
-                    </p>
-                  </CardContent>
-                </Card>
-              );
-            })}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+            {/* 1 · Net Income */}
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Net Income</p>
+                <p className={cn("text-2xl font-bold mt-1", ncf.actual >= 0 ? "text-gray-900" : "text-red-600")}>
+                  {fmt(ncf.actual)}
+                </p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span className="text-xs text-gray-400">Bgt {fmt(ncf.budget)}</span>
+                  <span className={cn("text-xs font-medium", varColor(ncf.actual - ncf.budget, false))}>
+                    {varStr(ncf.actual - ncf.budget)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 2 · Occupancy */}
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Occupancy</p>
+                <p className={cn("text-2xl font-bold mt-1", occupancy.actual >= occupancy.budget ? "text-emerald-600" : "text-amber-600")}>
+                  {occupancy.actual.toFixed(1)}%
+                </p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span className="text-xs text-gray-400">Bgt {occupancy.budget.toFixed(1)}%</span>
+                  <span className={cn("text-xs font-medium", (occupancy.actual - occupancy.budget) >= 0 ? "text-emerald-600" : "text-red-500")}>
+                    {(occupancy.actual - occupancy.budget) >= 0 ? "+" : ""}{(occupancy.actual - occupancy.budget).toFixed(1)}pp
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 3 · Delinquency % */}
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Delinquency % of GPR</p>
+                <p className={cn("text-2xl font-bold mt-1", delinqActualPct <= delinqBudgetPct ? "text-emerald-600" : "text-red-600")}>
+                  {delinqActualPct.toFixed(1)}%
+                </p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span className="text-xs text-gray-400">Bgt {delinqBudgetPct.toFixed(1)}%</span>
+                  <span className={cn("text-xs font-medium", (delinqActualPct - delinqBudgetPct) <= 0 ? "text-emerald-600" : "text-red-500")}>
+                    {(delinqActualPct - delinqBudgetPct) >= 0 ? "+" : ""}{(delinqActualPct - delinqBudgetPct).toFixed(1)}pp
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           {/* Financials table */}
@@ -595,37 +639,60 @@ export default function TowneEastPage() {
           </div>
 
           <div className="grid md:grid-cols-2 gap-5">
-            {/* Scope progress */}
+            {/* Avg Spend by Unit Type */}
             <Card className="border-gray-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold text-gray-700">Budget by Scope</CardTitle>
+              <CardHeader className="pb-0">
+                <CardTitle className="text-sm font-semibold text-gray-700">Avg Spend by Unit Type</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {RENO_SCOPES.map((scope) => {
-                  const pct = Math.round((scope.spent / scope.budget) * 100);
-                  return (
-                    <div key={scope.scope}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-gray-800">{scope.scope}</span>
-                        <span className="text-xs text-gray-500">
-                          {fmt(scope.spent)} / {fmt(scope.budget)} ({pct}%)
-                        </span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-gray-100 overflow-hidden">
-                        <div
-                          className={cn("h-full rounded-full transition-all", {
-                            "bg-emerald-500": pct >= 90,
-                            "bg-blue-500":    pct >= 50 && pct < 90,
-                            "bg-amber-500":   pct >= 20 && pct < 50,
-                            "bg-gray-300":    pct < 20,
-                          })}
-                          style={{ width: `${Math.min(100, pct)}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{scope.unitsDone} of {scope.unitsTotal} units complete</p>
-                    </div>
-                  );
-                })}
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        {["Unit Type", "Budget / Unit", "Avg Actual / Unit", "Variance / Unit", "Units Done", "Status"].map((h) => (
+                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {RENO_BY_TYPE.map((row) => {
+                        const variance = row.avgActualPerUnit - row.budgetPerUnit;
+                        const isOver   = variance > 0;
+                        return (
+                          <tr key={row.type} className="hover:bg-gray-50">
+                            <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{row.type}</td>
+                            <td className="px-3 py-2.5 text-gray-500">{fmt(row.budgetPerUnit)}</td>
+                            <td className="px-3 py-2.5 font-medium text-gray-900">{fmt(row.avgActualPerUnit)}</td>
+                            <td className={cn("px-3 py-2.5 font-semibold", isOver ? "text-red-500" : "text-emerald-600")}>
+                              {isOver ? "+" : ""}{fmt(variance)}
+                            </td>
+                            <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
+                              {row.unitsDone} of {row.unitsTotal}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <Badge className={cn("text-xs border", isOver
+                                ? "bg-red-100 text-red-800 border-red-200"
+                                : "bg-emerald-100 text-emerald-800 border-emerald-200"
+                              )}>
+                                {isOver ? "Over Budget" : "On Budget"}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 py-3 border-t border-gray-100 space-y-1">
+                  {RENO_BY_TYPE.map((row) => (
+                    <p key={row.type} className="text-xs text-gray-500">
+                      <span className="font-medium text-gray-700">{row.type}</span>
+                      {" "}— {row.unitsDone} of {row.unitsTotal} units completed · avg {fmt(row.avgActualPerUnit)} / unit
+                    </p>
+                  ))}
+                </div>
               </CardContent>
             </Card>
 
