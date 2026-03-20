@@ -63,28 +63,42 @@ export default function OverviewTab({ propertyId }: Props) {
   const isSinglePoint = trend.length === 1;
 
   // ── Financial metrics from latest month ───────────────────────────────────
-  const { noi, month: finMonth } = computePropertyFinancials(state.financials, propertyId);
+  const { month: finMonth } = computePropertyFinancials(state.financials, propertyId);
 
-  const propFins = state.financials.filter((f) => f.propertyId === propertyId);
+  const propFins   = state.financials.filter((f) => f.propertyId === propertyId);
   const latestItems = finMonth ? propFins.filter((f) => f.month === finMonth && !f.isNOI) : [];
 
-  const totalIncomeActual   = latestItems.filter((f) => f.category === "Income").reduce((s, f) => s + f.actual, 0);
-  const totalExpensesActual = latestItems.filter((f) => f.category === "Expenses").reduce((s, f) => s + f.actual, 0);
-  const totalDebtService    = latestItems.filter((f) => f.category === "Debt Service").reduce((s, f) => s + f.actual, 0);
+  // NOI: read actual + budget from the isNOI line item for the latest non-budget-only month
+  const noiItem    = finMonth ? propFins.find((f) => f.month === finMonth && f.isNOI && !f.budgetOnly) : null;
+  const noi        = noiItem?.actual ?? 0;
+  const noiBudget  = (noiItem?.budget && noiItem.budget !== 0) ? noiItem.budget
+                   : (property.noiBudget ?? null);
 
   // Expense ratio: Operating Expenses / EGI
-  const expenseRatio = totalIncomeActual > 0 ? (totalExpensesActual / totalIncomeActual) * 100 : null;
-  // DSCR: NOI / Debt Service
-  const dscr = totalDebtService > 0 ? noi / totalDebtService : null;
+  const totalIncomeFin   = latestItems.filter((f) => f.category === "Income").reduce((s, f) => s + f.actual, 0);
+  const totalExpensesFin = latestItems.filter((f) => f.category === "Expenses").reduce((s, f) => s + f.actual, 0);
+  const expenseRatio     = totalIncomeFin > 0 ? (totalExpensesFin / totalIncomeFin) * 100 : null;
 
-  // ── Delinquency %  ────────────────────────────────────────────────────────
-  const delinqPct = property.delinquencyPct;
+  // DSCR: NOI / Total Debt Service
+  const totalDebtService = latestItems.filter((f) => f.category === "Debt Service").reduce((s, f) => s + f.actual, 0);
+  const dscr             = totalDebtService > 0 ? noi / totalDebtService : null;
 
-  // ── Status colors ─────────────────────────────────────────────────────────
+  // ── Delinquency ───────────────────────────────────────────────────────────
+  const delinqPct    = property.delinquencyPct;
+  const delinqBudget = property.delinquencyBudget ?? null;
+
+  // ── Derived variances ─────────────────────────────────────────────────────
+  const occBudget  = property.occupancyBudget ?? null;
+  const deltaOcc   = occBudget  != null ? currentOccupancy - occBudget  : null;
+  const deltaNOI   = noiBudget  != null ? noi - noiBudget  : null;
+  const deltaDelinq = delinqBudget != null ? delinqPct - delinqBudget : null;
+
+  // ── Color helpers ─────────────────────────────────────────────────────────
+  const occColor = currentOccupancy >= 93 ? "text-green-700"
+                 : currentOccupancy >= 85 ? "text-amber-600"
+                 : "text-red-600";
+
   const statColor = statusColor(property.status);
-
-  // ── Occupancy color ───────────────────────────────────────────────────────
-  const occColor = currentOccupancy >= 93 ? "text-green-700" : currentOccupancy >= 85 ? "text-amber-600" : "text-red-600";
 
   return (
     <div className="space-y-6">
@@ -95,20 +109,20 @@ export default function OverviewTab({ propertyId }: Props) {
         {/* 1 · Occupancy */}
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Occupancy</p>
-            <p className={`text-2xl font-bold mt-1 ${occColor}`}>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Occupancy</p>
+            <p className={`text-2xl font-bold ${occColor}`}>
               {formatPct(currentOccupancy)}
             </p>
-            {property.occupancyBudget != null ? (
+            {occBudget != null ? (
               <>
-                <p className="text-xs text-gray-400 mt-1.5">Bgt {formatPct(property.occupancyBudget)}</p>
-                <p className={`text-xs font-semibold mt-0.5 ${currentOccupancy >= property.occupancyBudget ? "text-green-600" : "text-red-500"}`}>
-                  {(currentOccupancy - property.occupancyBudget) >= 0 ? "+" : ""}
-                  {(currentOccupancy - property.occupancyBudget).toFixed(1)}pp
+                <p className="text-xs text-gray-400 mt-2">Budget: {formatPct(occBudget)}</p>
+                <p className={`text-xs font-semibold mt-0.5 ${(deltaOcc ?? 0) >= 0 ? "text-green-600" : "text-red-500"}`}>
+                  {(deltaOcc ?? 0) >= 0 ? "▲" : "▼"}&nbsp;
+                  {(deltaOcc ?? 0) >= 0 ? "+" : ""}{(deltaOcc ?? 0).toFixed(1)}pp
                 </p>
               </>
             ) : (
-              <p className="text-xs text-gray-300 mt-1.5">—</p>
+              <p className="text-xs text-gray-300 mt-2">Budget: —</p>
             )}
           </CardContent>
         </Card>
@@ -116,21 +130,22 @@ export default function OverviewTab({ propertyId }: Props) {
         {/* 2 · NOI */}
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NOI</p>
-            <p className={`text-2xl font-bold mt-1 ${!finMonth ? "text-gray-400" : noi >= 0 ? "text-gray-900" : "text-red-600"}`}>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">NOI</p>
+            <p className={`text-2xl font-bold ${!finMonth ? "text-gray-400" : noi >= 0 ? "text-gray-900" : "text-red-600"}`}>
               {finMonth ? formatCurrency(noi) : "—"}
             </p>
-            {finMonth && property.noiBudget != null ? (
+            {finMonth && noiBudget != null ? (
               <>
-                <p className="text-xs text-gray-400 mt-1.5">Bgt {formatCurrency(property.noiBudget)}</p>
-                <p className={`text-xs font-semibold mt-0.5 ${noi >= property.noiBudget ? "text-green-600" : "text-red-500"}`}>
-                  {noi >= property.noiBudget ? "+" : ""}{formatCurrency(noi - property.noiBudget)}
+                <p className="text-xs text-gray-400 mt-2">Budget: {formatCurrency(noiBudget)}</p>
+                <p className={`text-xs font-semibold mt-0.5 ${(deltaNOI ?? 0) >= 0 ? "text-green-600" : "text-red-500"}`}>
+                  {(deltaNOI ?? 0) >= 0 ? "▲" : "▼"}&nbsp;
+                  {(deltaNOI ?? 0) >= 0 ? "+" : ""}{formatCurrency(deltaNOI ?? 0)}
                 </p>
               </>
             ) : finMonth ? (
-              <p className="text-xs text-gray-300 mt-1.5">—</p>
+              <p className="text-xs text-gray-300 mt-2">Budget: —</p>
             ) : (
-              <p className="text-xs text-gray-400 mt-1.5">Upload financials</p>
+              <p className="text-xs text-gray-400 mt-2">Upload financials</p>
             )}
           </CardContent>
         </Card>
@@ -138,24 +153,24 @@ export default function OverviewTab({ propertyId }: Props) {
         {/* 3 · Delinquency % */}
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Delinquency %</p>
-            <p className={`text-2xl font-bold mt-1 ${
-              property.delinquencyBudget != null
-                ? delinqPct <= property.delinquencyBudget ? "text-green-700" : "text-red-600"
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Delinquency %</p>
+            <p className={`text-2xl font-bold ${
+              delinqBudget != null
+                ? delinqPct <= delinqBudget ? "text-green-700" : "text-red-600"
                 : delinqPct < 3 ? "text-green-700" : delinqPct < 6 ? "text-amber-600" : "text-red-600"
             }`}>
               {formatPct(delinqPct)}
             </p>
-            {property.delinquencyBudget != null ? (
+            {delinqBudget != null ? (
               <>
-                <p className="text-xs text-gray-400 mt-1.5">Bgt {formatPct(property.delinquencyBudget)}</p>
-                <p className={`text-xs font-semibold mt-0.5 ${delinqPct <= property.delinquencyBudget ? "text-green-600" : "text-red-500"}`}>
-                  {(delinqPct - property.delinquencyBudget) >= 0 ? "+" : ""}
-                  {(delinqPct - property.delinquencyBudget).toFixed(1)}pp
+                <p className="text-xs text-gray-400 mt-2">Budget: {formatPct(delinqBudget)}</p>
+                <p className={`text-xs font-semibold mt-0.5 ${(deltaDelinq ?? 0) <= 0 ? "text-green-600" : "text-red-500"}`}>
+                  {(deltaDelinq ?? 0) <= 0 ? "▼" : "▲"}&nbsp;
+                  {(deltaDelinq ?? 0) >= 0 ? "+" : ""}{(deltaDelinq ?? 0).toFixed(1)}pp
                 </p>
               </>
             ) : (
-              <p className="text-xs text-gray-300 mt-1.5">—</p>
+              <p className="text-xs text-gray-300 mt-2">Budget: —</p>
             )}
           </CardContent>
         </Card>
@@ -163,35 +178,37 @@ export default function OverviewTab({ propertyId }: Props) {
         {/* 4 · Expense Ratio */}
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Expense Ratio</p>
-            <p className={`text-2xl font-bold mt-1 ${
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Expense Ratio</p>
+            <p className={`text-2xl font-bold ${
               expenseRatio == null ? "text-gray-400"
-                : expenseRatio < 50 ? "text-green-700"
+                : expenseRatio < 50  ? "text-green-700"
                 : "text-red-600"
             }`}>
               {expenseRatio != null ? formatPct(expenseRatio) : "—"}
             </p>
-            <p className="text-xs text-gray-400 mt-1.5" title="Operating Expenses / EGI">
-              Oper. Expenses / EGI
-            </p>
+            <p className="text-xs text-gray-400 mt-2">Oper. Expenses / EGI</p>
+            {expenseRatio == null && (
+              <p className="text-xs text-gray-300 mt-0.5">Upload financials</p>
+            )}
           </CardContent>
         </Card>
 
         {/* 5 · DSCR */}
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">DSCR</p>
-            <p className={`text-2xl font-bold mt-1 ${
-              dscr == null ? "text-gray-400"
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">DSCR</p>
+            <p className={`text-2xl font-bold ${
+              dscr == null   ? "text-gray-400"
                 : dscr >= 1.25 ? "text-green-700"
                 : dscr >= 1.0  ? "text-amber-600"
                 : "text-red-600"
             }`}>
               {dscr != null ? `${dscr.toFixed(2)}x` : "—"}
             </p>
-            <p className="text-xs text-gray-400 mt-1.5" title="NOI / Debt Service">
-              {dscr != null ? "NOI / Debt Service" : "Upload T12 to calculate"}
-            </p>
+            <p className="text-xs text-gray-400 mt-2">NOI / Debt Service</p>
+            {dscr == null && finMonth && (
+              <p className="text-xs text-gray-300 mt-0.5">Upload T12 to calculate</p>
+            )}
           </CardContent>
         </Card>
 

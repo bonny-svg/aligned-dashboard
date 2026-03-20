@@ -51,6 +51,8 @@ export const SAMPLE_PROPERTIES: Property[] = [
     platform: "Resman",
     platformAccount: "TX-SA",
     lastImport: "2026-03-15T09:45:00Z",
+    noiBudget: 17125,
+    occupancyBudget: 94.0,
   },
   {
     id: "north-park",
@@ -66,6 +68,8 @@ export const SAMPLE_PROPERTIES: Property[] = [
     platform: "AppFolio",
     platformAccount: "G&C",
     lastImport: "2026-03-14T11:00:00Z",
+    noiBudget: 26215,
+    occupancyBudget: 89.0,
   },
   {
     id: "woodland-terrace",
@@ -223,9 +227,10 @@ function buildFinancials(propertyId: string, gpri: number, noi: number): Financi
   return items;
 }
 
-// ─── Explicit 2026 budget financials (Woodland Terrace & Hall Street Court) ───
+// ─── Explicit 2026 budget financials ─────────────────────────────────────────
 
-const rand2 = makePRNG(0xcafe1234);
+const rand2 = makePRNG(0xcafe1234); // Woodland Terrace & Hall Street Court
+const rand3 = makePRNG(0xdecafbad); // Woodhaven & North Park
 
 function budgetItems(
   pid: string,
@@ -241,21 +246,57 @@ function budgetItems(
   admin: number,
   noi: number,
   hasActuals: boolean,
+  rng = rand2,
 ): FinancialLineItem[] {
-  const v  = hasActuals ? 0.97 + rand2() * 0.06 : 1;
-  const ve = hasActuals ? 0.97 + rand2() * 0.06 : 1;
+  const v  = hasActuals ? 0.97 + rng() * 0.06 : 1;
+  const ve = hasActuals ? 0.97 + rng() * 0.06 : 1;
   const bo = !hasActuals;
   return [
-    { propertyId: pid, month, category: "Income",   lineItem: "Gross Potential Rent",  underwriting: gpr,       budget: gpr,       actual: hasActuals ? Math.round(gpr * v)  : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Income",   lineItem: "Vacancy Loss",           underwriting: vacLoss,   budget: vacLoss,   actual: hasActuals ? Math.round(vacLoss * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Income",   lineItem: "Other Income",           underwriting: otherIncome, budget: otherIncome, actual: hasActuals ? Math.round(otherIncome * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Expenses", lineItem: "Management Fee",         underwriting: mgmtFee,   budget: mgmtFee,   actual: hasActuals ? Math.round(mgmtFee * ve) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Expenses", lineItem: "Repairs & Maintenance",  underwriting: rm,        budget: rm,        actual: hasActuals ? Math.round(rm * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Expenses", lineItem: "Utilities",              underwriting: util,      budget: util,      actual: hasActuals ? Math.round(util * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Expenses", lineItem: "Insurance",              underwriting: ins,       budget: ins,       actual: hasActuals ? Math.round(ins * 1.0) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Expenses", lineItem: "Property Tax",           underwriting: propTax,   budget: propTax,   actual: hasActuals ? Math.round(propTax * 1.0) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "Expenses", lineItem: "Admin & Legal",          underwriting: admin,     budget: admin,     actual: hasActuals ? Math.round(admin * (0.97 + rand2() * 0.06)) : 0, budgetOnly: bo },
-    { propertyId: pid, month, category: "NOI",      lineItem: "Net Operating Income",   underwriting: noi,       budget: noi,       actual: hasActuals ? Math.round(noi * (0.93 + rand2() * 0.10)) : 0, isNOI: true, budgetOnly: bo },
+    { propertyId: pid, month, category: "Income",   lineItem: "Gross Potential Rent",  underwriting: gpr,         budget: gpr,         actual: hasActuals ? Math.round(gpr * v)  : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Income",   lineItem: "Vacancy Loss",           underwriting: vacLoss,     budget: vacLoss,     actual: hasActuals ? Math.round(vacLoss * (0.97 + rng() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Income",   lineItem: "Other Income",           underwriting: otherIncome, budget: otherIncome, actual: hasActuals ? Math.round(otherIncome * (0.97 + rng() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Management Fee",         underwriting: mgmtFee,     budget: mgmtFee,     actual: hasActuals ? Math.round(mgmtFee * ve) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Repairs & Maintenance",  underwriting: rm,          budget: rm,          actual: hasActuals ? Math.round(rm * (0.97 + rng() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Utilities",              underwriting: util,        budget: util,        actual: hasActuals ? Math.round(util * (0.97 + rng() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Insurance",              underwriting: ins,         budget: ins,         actual: hasActuals ? Math.round(ins * 1.0) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Property Tax",           underwriting: propTax,     budget: propTax,     actual: hasActuals ? Math.round(propTax * 1.0) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "Expenses", lineItem: "Admin & Legal",          underwriting: admin,       budget: admin,       actual: hasActuals ? Math.round(admin * (0.97 + rng() * 0.06)) : 0, budgetOnly: bo },
+    { propertyId: pid, month, category: "NOI",      lineItem: "Net Operating Income",   underwriting: noi,         budget: noi,         actual: hasActuals ? Math.round(noi * (0.93 + rng() * 0.10)) : 0, isNOI: true, budgetOnly: bo },
+  ];
+}
+
+function buildWoodhavenFinancials(): FinancialLineItem[] {
+  const pid = "woodhaven";
+  // Jan–Mar: EGI=28,200, Expenses=11,075, NOI=17,125
+  const jm = { gpr: 28776, vac: -1727, oi: 1151, mf: 2302, rm: 3000, ut: 1800, ins: 1200, pt: 1500, ad: 1273, noi: 17125 };
+  // Apr–Dec: EGI=28,920, Expenses=11,136, NOI=17,784
+  const ad = { gpr: 29510, vac: -1771, oi: 1180, mf: 2361, rm: 3000, ut: 1800, ins: 1200, pt: 1500, ad: 1275, noi: 17784 };
+  return [
+    ...["2026-01","2026-02","2026-03"].flatMap((m) =>
+      budgetItems(pid, m, jm.gpr, jm.vac, jm.oi, jm.mf, jm.rm, jm.ut, jm.ins, jm.pt, jm.ad, jm.noi, true, rand3)
+    ),
+    ...["2026-04","2026-05","2026-06","2026-07","2026-08","2026-09","2026-10","2026-11","2026-12"].flatMap((m) =>
+      budgetItems(pid, m, ad.gpr, ad.vac, ad.oi, ad.mf, ad.rm, ad.ut, ad.ins, ad.pt, ad.ad, ad.noi, false, rand3)
+    ),
+  ];
+}
+
+function buildNorthParkFinancials(): FinancialLineItem[] {
+  const pid = "north-park";
+  // Jan–Jul: EGI=61,800, Expenses=35,585, NOI=26,215
+  const jj = { gpr: 63061, vac: -3784, oi: 2522, mf: 5045, rm: 9000, ut: 7000, ins: 5000, pt: 7500, ad: 2040, noi: 26215 };
+  // Aug–Dec: EGI=65,200, Expenses=34,284, NOI=30,916
+  const ad = { gpr: 66531, vac: -3992, oi: 2661, mf: 5322, rm: 9200, ut: 7200, ins: 4500, pt: 6500, ad: 1562, noi: 30916 };
+  return [
+    ...["2026-01","2026-02","2026-03"].flatMap((m) =>
+      budgetItems(pid, m, jj.gpr, jj.vac, jj.oi, jj.mf, jj.rm, jj.ut, jj.ins, jj.pt, jj.ad, jj.noi, true, rand3)
+    ),
+    ...["2026-04","2026-05","2026-06","2026-07"].flatMap((m) =>
+      budgetItems(pid, m, jj.gpr, jj.vac, jj.oi, jj.mf, jj.rm, jj.ut, jj.ins, jj.pt, jj.ad, jj.noi, false, rand3)
+    ),
+    ...["2026-08","2026-09","2026-10","2026-11","2026-12"].flatMap((m) =>
+      budgetItems(pid, m, ad.gpr, ad.vac, ad.oi, ad.mf, ad.rm, ad.ut, ad.ins, ad.pt, ad.ad, ad.noi, false, rand3)
+    ),
   ];
 }
 
@@ -299,8 +340,8 @@ function buildHallStreetFinancials(): FinancialLineItem[] {
 
 const FINANCIALS: FinancialLineItem[] = [
   ...buildFinancials("towne-east",  92500,  38000),
-  ...buildFinancials("woodhaven",   28800,  11200),
-  ...buildFinancials("north-park",  62400,  24800),
+  ...buildWoodhavenFinancials(),
+  ...buildNorthParkFinancials(),
   ...buildWoodlandTerraceFinancials(),
   ...buildHallStreetFinancials(),
   ...buildFinancials("the-grove",  345600, 148000),
