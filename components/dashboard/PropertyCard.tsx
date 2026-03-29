@@ -4,10 +4,7 @@ import { useRouter } from "next/navigation";
 import { MapPin, Home, TrendingDown, TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  formatCurrency, formatPct, occupancyBg,
-  statusColor, computePropertyFinancials
-} from "@/lib/utils";
+import { formatCurrency, formatPct, occupancyBg, statusColor, computePropertyFinancials } from "@/lib/utils";
 import { useAppState } from "@/lib/store";
 import type { Platform, Property } from "@/lib/types";
 
@@ -30,51 +27,35 @@ interface Props { property: Property; }
 export default function PropertyCard({ property: p }: Props) {
   const router = useRouter();
   const { state } = useAppState();
+  const { noi, month } = computePropertyFinancials(state.financials, p.id);
 
-  const { noi, cashFlow, month } = computePropertyFinancials(state.financials, p.id);
+  const displayNOI   = noi ?? (p as any).lastNOI ?? null;
+  const displayMonth = month ?? (p as any).lastReportMonth ?? null;
 
-  // Use live NOI from sheets merge if financials not yet imported
-  const displayNOI         = noi ?? (p as any).lastNOI ?? null;
-  const displayMonth       = month ?? (p as any).lastReportMonth ?? null;
-  const displayOccupancy   = p.occupancyPct;
-  const displayDelinquency = p.delinquencyPct; // already merged from sheets in store
-
-  // Delinquency % of GPR from imported rent roll records (more precise)
   const rrRecords  = state.rentRoll.filter(r => r.propertyId === p.id);
   const delRecords = state.delinquency.filter(d => d.propertyId === p.id);
   const gprFromRR  = rrRecords.reduce((s, r) => s + r.marketRent, 0);
   const totalDel   = delRecords.reduce((s, d) => s + d.balance, 0);
-  const delPctGPR  = gprFromRR > 0
-    ? (totalDel / gprFromRR) * 100
-    : displayDelinquency;
+  const delPctGPR  = gprFromRR > 0 ? (totalDel / gprFromRR) * 100 : p.delinquencyPct;
 
   const occBg     = occupancyBg(p.occupancyPct);
   const statColor = statusColor(p.status);
 
   return (
-    <Card
-      onClick={() => router.push(`/property/${p.id}`)}
-      className="hover:scale-[1.01] transition-transform cursor-pointer"
-    >
+    <Card onClick={() => router.push(`/property/${p.id}`)} className="hover:scale-[1.01] transition-transform cursor-pointer">
       <CardContent className="pt-5">
 
-        {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1 min-w-0 pr-2">
-            <h3 className="font-semibold text-gray-900 text-base leading-tight truncate">
-              {p.name}
-            </h3>
+            <h3 className="font-semibold text-gray-900 text-base leading-tight truncate">{p.name}</h3>
             <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
               <MapPin className="h-3 w-3 flex-shrink-0" />
               <span>{p.city}, {p.state}</span>
             </div>
           </div>
-          <Badge className={`${statColor} border flex-shrink-0 text-xs`}>
-            {p.status}
-          </Badge>
+          <Badge className={`${statColor} border flex-shrink-0 text-xs`}>{p.status}</Badge>
         </div>
 
-        {/* Platform + units */}
         <div className="flex items-center gap-2 mb-4 flex-wrap">
           <span className="flex items-center gap-1 text-xs text-gray-500">
             <Home className="h-3 w-3" />{p.units} units
@@ -86,10 +67,8 @@ export default function PropertyCard({ property: p }: Props) {
           <span className="text-xs text-gray-400">{p.platformAccount}</span>
         </div>
 
-        {/* ── 4 KPI CARDS ── */}
         <div className="grid grid-cols-2 gap-2">
 
-          {/* KPI 1 — NOI vs Budget */}
           <div className="rounded-lg bg-gray-50 border border-gray-100 p-2.5 text-center">
             <p className="text-xs text-gray-500 font-medium mb-1">
               NOI {displayMonth ? `(${monthLabel(displayMonth)})` : ""}
@@ -101,9 +80,7 @@ export default function PropertyCard({ property: p }: Props) {
                 </p>
                 {p.noiBudget != null && (
                   <p className={`text-xs mt-0.5 flex items-center justify-center gap-0.5 ${displayNOI >= p.noiBudget ? "text-green-600" : "text-red-600"}`}>
-                    {displayNOI >= p.noiBudget
-                      ? <TrendingUp className="h-3 w-3" />
-                      : <TrendingDown className="h-3 w-3" />}
+                    {displayNOI >= p.noiBudget ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                     vs {formatCurrency(p.noiBudget)} budget
                   </p>
                 )}
@@ -113,53 +90,39 @@ export default function PropertyCard({ property: p }: Props) {
             )}
           </div>
 
-          {/* KPI 2 — Occupancy vs Budget */}
           <div className="rounded-lg bg-gray-50 border border-gray-100 p-2.5 text-center">
             <p className="text-xs text-gray-500 font-medium mb-1">Occupancy</p>
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${occBg}`}>
-              {formatPct(displayOccupancy)}
+              {formatPct(p.occupancyPct)}
             </span>
             {p.occupancyBudget != null && (
-              <p className={`text-xs mt-1 flex items-center justify-center gap-0.5 ${displayOccupancy >= p.occupancyBudget ? "text-green-600" : "text-amber-600"}`}>
-                {displayOccupancy >= p.occupancyBudget
-                  ? <TrendingUp className="h-3 w-3" />
-                  : <TrendingDown className="h-3 w-3" />}
+              <p className={`text-xs mt-1 flex items-center justify-center gap-0.5 ${p.occupancyPct >= p.occupancyBudget ? "text-green-600" : "text-amber-600"}`}>
+                {p.occupancyPct >= p.occupancyBudget ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                 vs {formatPct(p.occupancyBudget)}
               </p>
             )}
           </div>
 
-          {/* KPI 3 — Delinquency % of GPR */}
           <div className="rounded-lg bg-gray-50 border border-gray-100 p-2.5 text-center">
             <p className="text-xs text-gray-500 font-medium mb-1">Delinquency</p>
             <div className="flex items-center justify-center gap-0.5">
               {delPctGPR > 4 && <TrendingDown className="h-3 w-3 text-red-500" />}
-              <p className={`text-sm font-bold ${
-                delPctGPR < 3 ? "text-green-600" :
-                delPctGPR < 6 ? "text-amber-600" : "text-red-600"
-              }`}>
+              <p className={`text-sm font-bold ${delPctGPR < 3 ? "text-green-600" : delPctGPR < 6 ? "text-amber-600" : "text-red-600"}`}>
                 {formatPct(delPctGPR / 100)}
               </p>
             </div>
             <p className="text-xs text-gray-400 mt-0.5">% of GPR</p>
           </div>
 
-          {/* KPI 4 — Collected MTD */}
           <div className="rounded-lg bg-gray-50 border border-gray-100 p-2.5 text-center">
             <p className="text-xs text-gray-500 font-medium mb-1">Collected MTD</p>
-            <p className="text-sm font-bold text-gray-900">
-              {formatCurrency(p.collectedMTD)}
-            </p>
+            <p className="text-sm font-bold text-gray-900">{formatCurrency(p.collectedMTD)}</p>
             {gprFromRR > 0 && (
-              <p className="text-xs text-gray-400 mt-0.5">
-                {formatPct(p.collectedMTD / gprFromRR)} of GPR
-              </p>
+              <p className="text-xs text-gray-400 mt-0.5">{formatPct(p.collectedMTD / gprFromRR)} of GPR</p>
             )}
           </div>
 
         </div>
-        {/* ── END 4 KPI CARDS ── */}
-
       </CardContent>
     </Card>
   );
