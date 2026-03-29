@@ -1,4 +1,4 @@
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwBnxvrG8CnVF2POCQvxbHG0J6WFbXO924nkadbxw5x-BExYWfRi2-inFrDCuOx1ptu/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwPWNLHRNe476OQF5YcWb6TD_6oM7tPN1t5PPKDV-lQtFDwantuxCETEn8uGHxthy-w/exec';
 
 export interface SheetRow {
   [key: string]: string;
