@@ -1,5 +1,3 @@
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwPWNLHRNe476OQF5YcWb6TD_6oM7tPN1t5PPKDV-lQtFDwantuxCETEn8uGHxthy-w/exec';
-
 export interface SheetRow {
   [key: string]: string;
 }
@@ -24,7 +22,7 @@ function latestPerProperty(rows: SheetRow[]): Record<string, SheetRow> {
 
 export async function fetchSheetsSummary(): Promise<SheetsSummary | null> {
   try {
-    const res = await fetch(APPS_SCRIPT_URL, { cache: 'no-store' });
+    const res = await fetch('/api/sheets', { cache: 'no-store' });
     if (!res.ok) return null;
     const raw = await res.json();
     return {
