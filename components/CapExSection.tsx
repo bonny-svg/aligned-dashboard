@@ -18,6 +18,7 @@ interface CapExPhase {
   totalUnderwriting: number;
   totalActual: number | null;
   items: CapExItem[];
+  grandTotalUnderwriting: number;
 }
 
 interface CapExData {
@@ -33,10 +34,11 @@ function fmt(n: number): string {
   return '$' + n.toFixed(0);
 }
 
-function variance(actual: number | null, underwriting: number): { val: number; display: string; color: string } | null {
+function calcVariance(actual: number | null, underwriting: number): { val: number; display: string; color: string } | null {
   if (actual === null) return null;
   const val = actual - underwriting;
-  const display = (val > 0 ? '+' : '') + fmt(Math.abs(val)) + (val > 0 ? ' over' : ' under');
+  const abs = Math.abs(val);
+  const display = (val > 0 ? '+' : '-') + fmt(abs) + (val > 0 ? ' over' : ' under');
   const color = val > 0 ? 'text-red-500' : 'text-green-600';
   return { val, display, color };
 }
@@ -52,7 +54,7 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; bar:
 function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const c = COLOR_MAP[phase.color] || COLOR_MAP.gray;
-  const v = variance(phase.totalActual, phase.totalUnderwriting);
+  const v = calcVariance(phase.totalActual, phase.totalUnderwriting);
   const pct = phase.grandTotalUnderwriting > 0
     ? (phase.totalUnderwriting / phase.grandTotalUnderwriting) * 100
     : 0;
@@ -68,6 +70,7 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
           <span className={'text-xs px-2 py-0.5 rounded-full border font-medium ' + c.badge}>
             {phase.items.length} items
           </span>
+          <span className="text-xs text-gray-400">{pct.toFixed(0)}% of budget</span>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-right">
@@ -83,7 +86,7 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
           {v && (
             <div className={'text-xs font-semibold ' + v.color}>{v.display}</div>
           )}
-          <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
+          <span className="text-gray-400 text-xs ml-2">{open ? '▲' : '▼'}</span>
         </div>
       </button>
 
@@ -101,7 +104,7 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
             </thead>
             <tbody className="divide-y divide-gray-50 bg-white">
               {phase.items.map(function(item, i) {
-                const v = variance(item.actual, item.underwriting ?? 0);
+                const iv = calcVariance(item.actual, item.underwriting ?? 0);
                 return (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className="px-4 py-2.5 font-medium text-gray-800">{item.item}</td>
@@ -111,8 +114,8 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
                     <td className="px-4 py-2.5 text-right text-gray-800 font-medium">
                       {item.actual !== null ? fmt(item.actual) : '—'}
                     </td>
-                    <td className={'px-4 py-2.5 text-right font-medium ' + (v ? v.color : 'text-gray-300')}>
-                      {v ? v.display : '—'}
+                    <td className={'px-4 py-2.5 text-right font-medium ' + (iv ? iv.color : 'text-gray-300')}>
+                      {iv ? iv.display : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-400 max-w-xs">{item.notes || '—'}</td>
                   </tr>
@@ -153,7 +156,6 @@ export default function CapExSection() {
         return r.json();
       })
       .then(function(d) {
-        // Pass grandTotalUnderwriting into each phase for pct calc
         if (d.phases) {
           d.phases = d.phases.map(function(p: CapExPhase) {
             return Object.assign({}, p, { grandTotalUnderwriting: d.grandTotalUnderwriting });
@@ -181,7 +183,7 @@ export default function CapExSection() {
     );
   }
 
-  const v = variance(data.grandTotalActual, data.grandTotalUnderwriting);
+  const v = calcVariance(data.grandTotalActual, data.grandTotalUnderwriting);
 
   return (
     <div className="space-y-6">
