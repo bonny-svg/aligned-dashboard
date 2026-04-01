@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { MapPin, Home, Clock, CheckCircle2, AlertCircle, Circle } from "lucide-react";
+import { MapPin, Home, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import RenovationSection from "@/components/RenovationSection";
+import CapExSection from "@/components/CapExSection";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 type Month = "mar" | "feb" | "jan";
@@ -50,7 +51,6 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
 }
 
 // ─── PLACEHOLDER DATA ─────────────────────────────────────────────────────────
-
 const INCOME: Record<Month, FinRow[]> = {
   mar: [
     { label: "Gross Potential Rent",   actual:  89_000, budget:  89_000 },
@@ -156,7 +156,6 @@ const BELOW_LINE: Record<Month, FinRow[]> = {
   ],
 };
 
-// ─── DELINQUENCY DATA ─────────────────────────────────────────────────────────
 const DELINQUENCY = [
   { tenant: "Maria Santos",    unit: "114A", balance: 5_820, aging0_30:     0, aging30plus: 5_820, action: "Eviction Filed", notes: "Filed 2/28. Court date 3/22." },
   { tenant: "Linda Tran",      unit: "308B", balance: 3_750, aging0_30:     0, aging30plus: 3_750, action: "Eviction Filed", notes: "Second filing this lease term." },
@@ -168,49 +167,11 @@ const DELINQUENCY = [
   { tenant: "Marcus Hill",     unit: "317A", balance: 1_480, aging0_30: 1_480, aging30plus:     0, action: "None",           notes: null },
 ];
 
-// ─── OCCUPANCY DATA ───────────────────────────────────────────────────────────
 const OCCUPANCY: Record<Month, { actual: number; budget: number }> = {
   mar: { actual: 91.0, budget: 93.0 },
   feb: { actual: 92.0, budget: 93.0 },
   jan: { actual: 93.5, budget: 93.0 },
 };
-
-// ─── CAPEX DATA ───────────────────────────────────────────────────────────────
-const CAPEX_PROJECTS = [
-  { item: "Building C Roof Replacement",  budget: 45_000, spent: 38_250, pct: 85,  status: "In Progress" },
-  { item: "HVAC Replacements (5 units)",  budget: 18_500, spent: 18_500, pct: 100, status: "Completed"   },
-  { item: "Security Camera System",       budget: 12_000, spent: 12_000, pct: 100, status: "Completed"   },
-  { item: "Pool Resurfacing & Equipment", budget: 22_000, spent:  3_200, pct: 15,  status: "In Progress" },
-  { item: "Parking Lot Seal & Stripe",    budget:  8_500, spent:      0, pct: 0,   status: "On Hold"     },
-];
-
-const WORK_ORDERS = [
-  { wo: "WO-2001", unit: "114B", cat: "HVAC",       desc: "AC not cooling — possible refrigerant leak", vendor: "6/1 HVAC Services",  cost: 380,   status: "In Progress" },
-  { wo: "WO-2002", unit: "228A", cat: "Plumbing",    desc: "Leak under kitchen sink",                   vendor: "SplashPro Plumbing", cost: 175,   status: "Open"        },
-  { wo: "WO-2003", unit: "301C", cat: "Electrical",  desc: "GFCI outlet replacement (bathroom)",        vendor: "QuickFix Electric",  cost: 120,   status: "Completed"   },
-  { wo: "WO-2004", unit: "105A", cat: "Appliance",   desc: "Dishwasher not draining",                   vendor: "All Pro Appliance",  cost: 250,   status: "Open"        },
-  { wo: "WO-2005", unit: "210B", cat: "Make Ready",  desc: "Full unit turn — paint, clean, carpet",     vendor: "In-house",           cost: 1_200, status: "In Progress" },
-  { wo: "WO-2006", unit: "317A", cat: "Plumbing",    desc: "Running toilet, slow drain in master bath", vendor: "SplashPro Plumbing", cost: 195,   status: "Open"        },
-];
-
-// ─── STATUS HELPERS ───────────────────────────────────────────────────────────
-function capexStatusBadge(s: string): string {
-  switch (s) {
-    case "Completed":   return "bg-emerald-100 text-emerald-800 border-emerald-200";
-    case "In Progress": return "bg-blue-100 text-blue-800 border-blue-200";
-    case "On Hold":     return "bg-gray-100 text-gray-600 border-gray-200";
-    default:            return "bg-gray-100 text-gray-600 border-gray-200";
-  }
-}
-
-function woStatusBadge(s: string): string {
-  switch (s) {
-    case "Completed":   return "bg-emerald-100 text-emerald-800 border-emerald-200";
-    case "In Progress": return "bg-amber-100 text-amber-800 border-amber-200";
-    case "Open":        return "bg-blue-100 text-blue-800 border-blue-200";
-    default:            return "bg-gray-100 text-gray-600 border-gray-200";
-  }
-}
 
 // ─── SUB-COMPONENTS ───────────────────────────────────────────────────────────
 function FinRowComponent({ row, isExpense }: { row: FinRow; isExpense?: boolean }) {
@@ -242,9 +203,7 @@ function FinRowComponent({ row, isExpense }: { row: FinRow; isExpense?: boolean 
 function SectionHeader({ label, colorClass }: { label: string; colorClass: string }) {
   return (
     <tr className={cn("border-t-2 border-gray-200", colorClass)}>
-      <td colSpan={4} className="px-4 py-2 text-xs font-bold uppercase tracking-wider">
-        {label}
-      </td>
+      <td colSpan={4} className="px-4 py-2 text-xs font-bold uppercase tracking-wider">{label}</td>
     </tr>
   );
 }
@@ -299,24 +258,19 @@ export default function TowneEastPage() {
   const dscr         = debtServiceActual > 0 ? noi.actual / debtServiceActual : null;
   const expenseRatio = egi.actual > 0 ? (expensesSum.actual / egi.actual) * 100 : null;
 
-  const totalDelinquent  = DELINQUENCY.reduce((s, d) => s + d.balance, 0);
-  const total30plus      = DELINQUENCY.reduce((s, d) => s + d.aging30plus, 0);
-  const totalCapexBudget = CAPEX_PROJECTS.reduce((s, p) => s + p.budget, 0);
-  const totalCapexSpent  = CAPEX_PROJECTS.reduce((s, p) => s + p.spent, 0);
-  const openWOs          = WORK_ORDERS.filter((w) => w.status !== "Completed").length;
+  const totalDelinquent = DELINQUENCY.reduce((s, d) => s + d.balance, 0);
+  const total30plus     = DELINQUENCY.reduce((s, d) => s + d.aging30plus, 0);
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ── STICKY HEADER ──────────────────────────────────────────────────── */}
+      {/* ── STICKY HEADER ── */}
       <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="flex flex-wrap items-start justify-between gap-3 pt-4 pb-2">
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-xl font-bold text-gray-900">Towne East Village</h1>
-                <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs px-2.5 py-0.5">
-                  Active
-                </Badge>
+                <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs px-2.5 py-0.5">Active</Badge>
               </div>
               <div className="flex flex-wrap items-center gap-4 mt-1 text-xs text-gray-500">
                 <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />Converse, TX</span>
@@ -339,15 +293,11 @@ export default function TowneEastPage() {
         </div>
       </header>
 
-      {/* ── PAGE CONTENT ───────────────────────────────────────────────────── */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-14">
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 1 · FINANCIALS
-        ══════════════════════════════════════════════════════════════════ */}
+        {/* ── FINANCIALS ── */}
         <section id="financials" className="scroll-mt-28">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Financials — Actuals vs. Budget</h2>
-
           <div className="flex gap-1 border-b border-gray-200 mb-5">
             {(["mar", "feb", "jan"] as Month[]).map((m) => {
               const labels: Record<Month, string> = { mar: "Mar 2025", feb: "Feb 2025", jan: "Jan 2025" };
@@ -355,11 +305,8 @@ export default function TowneEastPage() {
                 <button
                   key={m}
                   onClick={() => setMonth(m)}
-                  className={cn(
-                    "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-                    month === m
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                    month === m ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
                   )}
                 >
                   {labels[m]}
@@ -381,20 +328,14 @@ export default function TowneEastPage() {
                 </p>
               </CardContent>
             </Card>
-
             <Card className="border-gray-200">
               <CardContent className="pt-4 pb-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NOI</p>
-                <p className={cn("text-2xl font-bold mt-1", noi.actual >= 0 ? "text-gray-900" : "text-red-600")}>
-                  {fmt(noi.actual)}
-                </p>
+                <p className={cn("text-2xl font-bold mt-1", noi.actual >= 0 ? "text-gray-900" : "text-red-600")}>{fmt(noi.actual)}</p>
                 <p className="text-xs text-gray-400 mt-1.5">Bgt {fmt(noi.budget)}</p>
-                <p className={cn("text-xs font-semibold mt-0.5", varColor(noi.actual - noi.budget, false))}>
-                  {varStr(noi.actual - noi.budget)}
-                </p>
+                <p className={cn("text-xs font-semibold mt-0.5", varColor(noi.actual - noi.budget, false))}>{varStr(noi.actual - noi.budget)}</p>
               </CardContent>
             </Card>
-
             <Card className="border-gray-200">
               <CardContent className="pt-4 pb-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Delinquency %</p>
@@ -407,25 +348,19 @@ export default function TowneEastPage() {
                 </p>
               </CardContent>
             </Card>
-
             <Card className="border-gray-200">
               <CardContent className="pt-4 pb-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Expense Ratio</p>
-                <p className={cn("text-2xl font-bold mt-1",
-                  expenseRatio == null ? "text-gray-400" : expenseRatio < 50 ? "text-emerald-600" : "text-red-600"
-                )}>
+                <p className={cn("text-2xl font-bold mt-1", expenseRatio == null ? "text-gray-400" : expenseRatio < 50 ? "text-emerald-600" : "text-red-600")}>
                   {expenseRatio != null ? `${expenseRatio.toFixed(1)}%` : "—"}
                 </p>
                 <p className="text-xs text-gray-400 mt-1.5">Oper. Expenses / EGI</p>
               </CardContent>
             </Card>
-
             <Card className="border-gray-200">
               <CardContent className="pt-4 pb-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">DSCR</p>
-                <p className={cn("text-2xl font-bold mt-1",
-                  dscr == null ? "text-gray-400" : dscr >= 1.25 ? "text-emerald-600" : dscr >= 1.0 ? "text-amber-600" : "text-red-600"
-                )}>
+                <p className={cn("text-2xl font-bold mt-1", dscr == null ? "text-gray-400" : dscr >= 1.25 ? "text-emerald-600" : dscr >= 1.0 ? "text-amber-600" : "text-red-600")}>
                   {dscr != null ? `${dscr.toFixed(2)}x` : "—"}
                 </p>
                 <p className="text-xs text-gray-400 mt-1.5">NOI / Debt Service</p>
@@ -440,9 +375,7 @@ export default function TowneEastPage() {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       {["Line Item", "Budget", "Actual", "Variance"].map((h) => (
-                        <th key={h} className={cn("px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide", h === "Line Item" ? "text-left" : "text-right")}>
-                          {h}
-                        </th>
+                        <th key={h} className={cn("px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide", h === "Line Item" ? "text-left" : "text-right")}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -450,21 +383,16 @@ export default function TowneEastPage() {
                     <SectionHeader label="Income" colorClass="bg-blue-50/70 text-blue-700" />
                     {income.map((r) => <FinRowComponent key={r.label} row={r} />)}
                     <FinRowComponent row={{ label: "Total Effective Gross Income", actual: egi.actual, budget: egi.budget, isSummary: true }} />
-
                     <SectionHeader label="Collections" colorClass="bg-teal-50/60 text-teal-700" />
                     {collections.map((r) => <FinRowComponent key={r.label} row={r} />)}
                     <FinRowComponent row={{ label: "Net Collections", actual: netCollections.actual, budget: netCollections.budget, isSummary: true }} />
-
                     <SectionHeader label="Operating Expenses" colorClass="bg-amber-50/60 text-amber-700" />
                     {expenses.map((r) => <FinRowComponent key={r.label} row={r} isExpense />)}
                     <FinRowComponent row={{ label: "Total Operating Expenses", actual: expensesSum.actual, budget: expensesSum.budget, isSummary: true }} isExpense />
-
                     <SummaryRow label="Net Operating Income (NOI)" actual={noi.actual} budget={noi.budget} />
-
                     <SectionHeader label="Below the Line" colorClass="bg-slate-50/60 text-slate-600" />
                     {belowLine.map((r) => <FinRowComponent key={r.label} row={r} isExpense />)}
                     <FinRowComponent row={{ label: "Total Below the Line", actual: belowLineSum.actual, budget: belowLineSum.budget, isSummary: true }} isExpense />
-
                     <SummaryRow label="Net Cash Flow" actual={ncf.actual} budget={ncf.budget} />
                   </tbody>
                 </table>
@@ -473,18 +401,15 @@ export default function TowneEastPage() {
           </Card>
         </section>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 2 · DELINQUENCY
-        ══════════════════════════════════════════════════════════════════ */}
+        {/* ── DELINQUENCY ── */}
         <section id="delinquency" className="scroll-mt-28">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Delinquency</h2>
-
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             {[
-              { label: "Total Delinquent",  value: fmt(totalDelinquent),                                    color: "text-red-600" },
-              { label: "Delinquent Units",  value: `${DELINQUENCY.length} / 100`,                           color: "text-red-600" },
-              { label: "30+ Days Past Due", value: fmt(total30plus),                                        color: "text-red-700" },
-              { label: "Delinquency Rate",  value: `${((totalDelinquent / 89_000) * 100).toFixed(1)}%`,     color: "text-red-600" },
+              { label: "Total Delinquent",  value: fmt(totalDelinquent),                                color: "text-red-600" },
+              { label: "Delinquent Units",  value: `${DELINQUENCY.length} / 100`,                       color: "text-red-600" },
+              { label: "30+ Days Past Due", value: fmt(total30plus),                                    color: "text-red-700" },
+              { label: "Delinquency Rate",  value: `${((totalDelinquent / 89_000) * 100).toFixed(1)}%`, color: "text-red-600" },
             ].map(({ label, value, color }) => (
               <Card key={label} className="border-red-100 bg-red-50/40">
                 <CardContent className="pt-4 pb-3">
@@ -494,7 +419,6 @@ export default function TowneEastPage() {
               </Card>
             ))}
           </div>
-
           <Card className="border-gray-200">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -549,103 +473,18 @@ export default function TowneEastPage() {
           </Card>
         </section>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 3 · RENOVATIONS — LIVE FROM GOOGLE SHEETS
-        ══════════════════════════════════════════════════════════════════ */}
+        {/* ── RENOVATIONS ── */}
         <section id="renovations" className="scroll-mt-28">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Renovations</h2>
           <RenovationSection />
         </section>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 4 · CAPEX
-        ══════════════════════════════════════════════════════════════════ */}
+        {/* ── CAPEX ── */}
         <section id="capex" className="scroll-mt-28 pb-16">
           <h2 className="text-lg font-bold text-gray-900 mb-4">CapEx</h2>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {[
-              { label: "CapEx Budget",     value: fmt(totalCapexBudget),                color: "text-gray-900" },
-              { label: "CapEx Spent",      value: fmt(totalCapexSpent),                 color: totalCapexSpent > totalCapexBudget ? "text-red-600" : "text-gray-900" },
-              { label: "Remaining",        value: fmt(totalCapexBudget - totalCapexSpent), color: "text-blue-700" },
-              { label: "Open Work Orders", value: `${openWOs} open`,                    color: openWOs > 3 ? "text-amber-600" : "text-gray-900" },
-            ].map(({ label, value, color }) => (
-              <Card key={label} className="border-gray-200">
-                <CardContent className="pt-4 pb-3">
-                  <p className="text-xs font-medium text-gray-500">{label}</p>
-                  <p className={cn("text-xl font-bold mt-0.5", color)}>{value}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <Card className="border-gray-200 mb-5">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-gray-700">Capital Projects</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {CAPEX_PROJECTS.map((p) => (
-                <div key={p.item}>
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-800">{p.item}</span>
-                      <Badge className={cn("text-xs border", capexStatusBadge(p.status))}>{p.status}</Badge>
-                    </div>
-                    <span className="text-xs text-gray-500">{fmt(p.spent)} / {fmt(p.budget)} · {p.pct}%</span>
-                  </div>
-                  <div className="h-2.5 w-full rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className={cn("h-full rounded-full transition-all", {
-                        "bg-emerald-500": p.pct >= 100,
-                        "bg-blue-500":    p.pct >= 50 && p.pct < 100,
-                        "bg-amber-500":   p.pct >= 20 && p.pct < 50,
-                        "bg-gray-300":    p.pct < 20,
-                      })}
-                      style={{ width: `${Math.min(100, p.pct)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="border-gray-200">
-            <CardHeader className="pb-0">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold text-gray-700">Work Orders</CardTitle>
-                <span className="text-xs text-gray-400">{openWOs} open</span>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      {["WO #", "Unit", "Category", "Description", "Vendor", "Est. Cost", "Status"].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {WORK_ORDERS.map((wo) => (
-                      <tr key={wo.wo} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{wo.wo}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs font-semibold text-gray-800">{wo.unit}</td>
-                        <td className="px-4 py-2.5 text-gray-600">{wo.cat}</td>
-                        <td className="px-4 py-2.5 text-gray-800 max-w-[220px] truncate">{wo.desc}</td>
-                        <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{wo.vendor}</td>
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{fmt(wo.cost)}</td>
-                        <td className="px-4 py-2.5">
-                          <Badge className={cn("text-xs border", woStatusBadge(wo.status))}>{wo.status}</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+          <CapExSection />
         </section>
+
       </main>
     </div>
   );
