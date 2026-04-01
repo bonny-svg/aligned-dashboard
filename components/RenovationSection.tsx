@@ -120,4 +120,80 @@ export default function RenovationSection() {
           <div className="text-2xl font-bold text-gray-900">{summary.totalUnitsInPlan} units</div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="text-xs text-gray-500 m
+          <div className="text-xs text-gray-500 mb-1">Units Complete</div>
+          <div className="text-2xl font-bold text-green-600">{summary.unitsComplete} of {summary.totalUnitsInPlan}</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="text-xs text-gray-500 mb-1">Total Budget</div>
+          <div className="text-2xl font-bold text-gray-900">${(summary.totalBudget / 1000).toFixed(0)}K</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="text-xs text-gray-500 mb-1">Total Spent</div>
+          <div className="text-2xl font-bold text-blue-600">{summary.totalSpent > 0 ? fmt(summary.totalSpent) : '—'}</div>
+        </div>
+      </div>
+
+      {/* Budget Progress Bar */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <span>Budget Used</span>
+          <span>{spentPct.toFixed(1)}%</span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-2">
+          <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${spentPct}%` }} />
+        </div>
+        <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <span>{fmt(summary.totalSpent)} spent</span>
+          <span>{fmt(summary.totalBudget - summary.totalSpent)} remaining</span>
+        </div>
+      </div>
+
+      {/* Avg Spend + Status Breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Avg Spend by Unit Type</h3>
+          {summary.byUnitType.length === 0 ? (
+            <p className="text-xs text-gray-400">No unit type data yet.</p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-gray-400 uppercase border-b border-gray-100">
+                      <th className="text-left pb-2 pr-3">Unit Type</th>
+                      <th className="text-right pb-2 pr-3">Budget</th>
+                      <th className="text-right pb-2 pr-3">Avg Actual</th>
+                      <th className="text-right pb-2 pr-3">Variance</th>
+                      <th className="text-right pb-2">Units</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {summary.byUnitType.map(row => {
+                      const variance = row.avgActualPerUnit - row.budgetPerUnit;
+                      const hasActual = row.avgActualPerUnit > 0;
+                      return (
+                        <tr key={row.type}>
+                          <td className="py-2.5 pr-3 font-medium text-gray-800">{row.type}</td>
+                          <td className="py-2.5 pr-3 text-right text-gray-600">{fmt(row.budgetPerUnit)}</td>
+                          <td className="py-2.5 pr-3 text-right text-gray-600">{hasActual ? fmt(row.avgActualPerUnit) : '—'}</td>
+                          <td className={`py-2.5 pr-3 text-right font-medium ${!hasActual ? 'text-gray-300' : variance > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                            {hasActual ? `${variance > 0 ? '+' : ''}${fmt(variance)}` : '—'}
+                          </td>
+                          <td className="py-2.5 text-right text-gray-500 text-xs">{row.unitsComplete} of {row.totalUnits}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-50 space-y-0.5">
+                {summary.byUnitType.map(row => (
+                  <p key={row.type} className="text-xs text-gray-400">
+                    {row.type} — {row.unitsComplete} of {row.totalUnits} units complete
+                    {row.avgActualPerUnit > 0 && ` · avg ${fmt(row.avgActualPerUnit)} / unit`}
+                  </p>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
