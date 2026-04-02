@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import RenovationSection from "@/components/RenovationSection";
 import CapExSection from "@/components/CapExSection";
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function fmt(n: number): string {
   const abs = Math.abs(n);
   const sign = n < 0 ? "-" : "";
@@ -17,14 +16,8 @@ function fmt(n: number): string {
   return `${sign}$${abs.toFixed(0)}`;
 }
 
-// ─── DATA ─────────────────────────────────────────────────────────────────────
-// OCCUPANCY — Current rent roll
 const OCCUPANCY = { occupied: 97, vacant: 3, inReno: 2, ready: 1, total: 100, pct: 97 };
 
-// COLLECTIONS — March 16–31 (15 days)
-// Rent prorations (3/1–3/16): $44,476.38 — Final Settlement Statement
-// Prepaid rents credited:      $2,107.20 — Final Settlement Statement
-// PTP credit from seller:      $9,000.00 — per conversation
 const MARCH_COLLECTIONS = {
   prorations:       44_476.38,
   prepaidRents:      2_107.20,
@@ -35,20 +28,18 @@ const MARCH_COLLECTIONS = {
   note: "Includes $44,476 rent proration + $2,107 prepaid rents (settlement statement) + $9,000 PTP credit from seller",
 };
 
-// OUTSTANDING BALANCE — from Sunridge / Lovable dashboard
 const OUTSTANDING = {
   total: 23_330.26,
   breakdown: [
-    { label: "Paid to Previous Owner",              amount:  8_162.09, color: "bg-gray-400",   textColor: "text-gray-600",  note: "Collected pre-close — seller crediting back" },
-    { label: "PTP This Weekend",                    amount:  3_520.00, color: "bg-amber-400",  textColor: "text-amber-700", note: "Promise to pay — expected this weekend" },
-    { label: "Skip — Unit 425 (Labrada)",           amount:  1_400.00, color: "bg-red-500",    textColor: "text-red-700",   note: "Former resident — eviction filed" },
-    { label: "In Eviction — Unit 412 (Reyna Cardenas)", amount: 1_939.45, color: "bg-red-500", textColor: "text-red-700",   note: "Eviction in progress" },
-    { label: "Pending Collection / Notation",       amount:  8_308.72, color: "bg-blue-500",   textColor: "text-blue-700",  note: "Being worked by Sunridge" },
+    { label: "Paid to Previous Owner",           amount:  8_162.09, color: "bg-gray-400",  textColor: "text-gray-600",  note: "Collected pre-close — seller crediting back" },
+    { label: "PTP This Weekend",                 amount:  3_520.00, color: "bg-amber-400", textColor: "text-amber-700", note: "Promise to pay — expected this weekend" },
+    { label: "Skip — Unit 425 (Labrada)",        amount:  1_400.00, color: "bg-red-500",   textColor: "text-red-700",   note: "Former resident — eviction filed" },
+    { label: "In Eviction — Unit 412",           amount:  1_939.45, color: "bg-red-500",   textColor: "text-red-700",   note: "Eviction in progress" },
+    { label: "Pending Collection / Notation",    amount:  8_308.72, color: "bg-blue-500",  textColor: "text-blue-700",  note: "Being worked by Sunridge" },
   ],
 };
-const NET_EXPOSURE = 23_330.26 - 8_162.09 - 3_520.00; // $11,648.17
+const NET_EXPOSURE = 23_330.26 - 8_162.09 - 3_520.00;
 
-// LEASING — from Lovable dashboard
 const LEASING = {
   applicationsReceived: 1, applicationsDenied: 1,
   moveInsMTD: 1, moveInUnit: "922", moveInDate: "3/12/2026",
@@ -56,7 +47,6 @@ const LEASING = {
   ntvCount: 0,
 };
 
-// RENEWAL PIPELINE — from Lovable dashboard
 const RENEWALS = [
   { month: "March", expirations: 15, renewed: 0, pending: 13, mtm: 7, ntv: 0 },
   { month: "April", expirations:  3, renewed: 0, pending:  3, mtm: 0, ntv: 0 },
@@ -64,60 +54,14 @@ const RENEWALS = [
   { month: "June",  expirations:  6, renewed: 0, pending:  6, mtm: 0, ntv: 0 },
 ];
 
-// VACANT UNITS — from Lovable dashboard
 const VACANT_UNITS = [
-  { unit: "521",  description: "Classic — leasing as-is",      status: "Ready"   },
-  { unit: "722",  description: "Renovation started 3/23/26",   status: "In Reno" },
-  { unit: "1024", description: "Renovation started 3/23/26",   status: "In Reno" },
+  { unit: "521",  description: "Classic — leasing as-is",    status: "Ready"   },
+  { unit: "722",  description: "Renovation started 3/23/26", status: "In Reno" },
+  { unit: "1024", description: "Renovation started 3/23/26", status: "In Reno" },
 ];
 
-// WORK ORDERS — from Lovable dashboard
 const WORK_ORDERS = { total: 9, open: 3, completed: 6 };
 
-// DELINQUENCY — from current rent roll, categorized
-const DELINQUENCY = [
-  { tenant: "Reyna Cardenas, Frederico", unit: "412",  balance: 1_939.45, category: "Eviction",   action: "Eviction Filed",  notes: "Chronic — in eviction" },
-  { tenant: "Labrada, Yoel",             unit: "425",  balance: 1_400.00, category: "Skip",        action: "Eviction Filed",  notes: "Former resident — unit vacant" },
-  { tenant: "Alfaro, Carol",             unit: "911",  balance: 1_725.00, category: "PTP",         action: "PTP",             notes: "Promise to pay this weekend" },
-  { tenant: "Cleto Mujica, Cinthya",     unit: "615",  balance: 1_620.00, category: "PTP",         action: "PTP",             notes: "Promise to pay this weekend" },
-  { tenant: "Nieto, Jonathan",           unit: "222",  balance: 1_530.00, category: "Prev Owner",  action: "Credit Pending",  notes: "Paid to previous owner — credit incoming" },
-  { tenant: "Priestley, Gavin",          unit: "612",  balance: 1_445.00, category: "Prev Owner",  action: "Credit Pending",  notes: "Paid to previous owner — credit incoming" },
-  { tenant: "Ellington, Alicia",         unit: "323",  balance: 1_300.00, category: "Prev Owner",  action: "Credit Pending",  notes: "Paid to previous owner — credit incoming" },
-  { tenant: "Martin, Jessica",           unit: "825",  balance: 1_191.00, category: "Prev Owner",  action: "Credit Pending",  notes: "Paid to previous owner — credit incoming" },
-  { tenant: "Wright, Jerrell",           unit: "421",  balance: 1_040.00, category: "Pending",     action: "Notice Sent",     notes: null },
-  { tenant: "Santos, Raymond",           unit: "525",  balance:   980.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Hernandez Asencio, Henrry", unit: "111",  balance:   980.00, category: "Pending",     action: "None",            notes: "Balance on closing roll" },
-  { tenant: "Grueiro, Juan",             unit: "622",  balance:   980.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Vlasak, Ryan",              unit: "324",  balance:   980.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Gonzalez, Luis",            unit: "724",  balance:   790.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Zapata, Jose",              unit: "922",  balance:   777.90, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Flores, Marisela",          unit: "1011", balance:   605.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Thomas, Jeremy",            unit: "224",  balance:   565.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Bryant, Damian",            unit: "1025", balance:   556.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Simmons, Michael",          unit: "913",  balance:   500.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Kindred, Dealia",           unit: "713",  balance:   260.01, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Castillo, Yadira",          unit: "114",  balance:   236.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Thwing, Jill",             unit: "712",  balance:    70.00, category: "Pending",     action: "None",            notes: null },
-  { tenant: "Cirlos, Linda",             unit: "322",  balance:    12.00, category: "Pending",     action: "None",            notes: null },
-];
-
-const totalDelinquent = DELINQUENCY.reduce((s, d) => s + d.balance, 0);
-const total30plus = DELINQUENCY
-  .filter(d => ["Eviction", "Skip", "Prev Owner"].includes(d.category))
-  .reduce((s, d) => s + d.balance, 0);
-
-function actionBadge(action: string) {
-  const map: Record<string, string> = {
-    "Eviction Filed": "bg-red-100 text-red-800 border-red-200",
-    "PTP":            "bg-amber-100 text-amber-800 border-amber-200",
-    "Credit Pending": "bg-blue-100 text-blue-800 border-blue-200",
-    "Notice Sent":    "bg-orange-100 text-orange-800 border-orange-200",
-    "None":           "bg-gray-100 text-gray-600 border-gray-200",
-  };
-  return map[action] || "bg-gray-100 text-gray-600 border-gray-200";
-}
-
-// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TowneEastPage() {
   const scrollTo = useCallback((id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -126,7 +70,6 @@ export default function TowneEastPage() {
   return (
     <div className="min-h-screen bg-gray-50">
 
-      {/* ── HEADER ── */}
       <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="flex flex-wrap items-start justify-between gap-3 pt-4 pb-2">
@@ -144,7 +87,7 @@ export default function TowneEastPage() {
             </div>
           </div>
           <nav className="flex gap-0 -mb-px overflow-x-auto">
-            {["Overview", "Collections", "Delinquency", "Renewals", "Renovations", "CapEx"].map((label) => (
+            {["Overview", "Collections", "Renewals", "Renovations", "CapEx"].map((label) => (
               <button
                 key={label}
                 onClick={() => scrollTo(label.toLowerCase())}
@@ -161,14 +104,12 @@ export default function TowneEastPage() {
 
         {/* ══ OVERVIEW ══ */}
         <section id="overview" className="scroll-mt-28">
-
-          {/* Activity strip */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             {[
-              { label: "Applications MTD", value: LEASING.applicationsReceived, sub: `${LEASING.applicationsDenied} denied (credit)`,                  icon: <Users className="h-5 w-5 text-blue-400" />,    bg: "bg-blue-50"   },
-              { label: "Move-ins MTD",      value: LEASING.moveInsMTD,           sub: `Unit ${LEASING.moveInUnit} · ${LEASING.moveInDate}`,              icon: <ArrowRight className="h-5 w-5 text-emerald-400" />, bg: "bg-emerald-50" },
-              { label: "Move-outs MTD",     value: LEASING.moveOutsMTD,          sub: `Unit ${LEASING.moveOutUnit} · ${LEASING.moveOutReason}`,           icon: <ArrowRight className="h-5 w-5 text-red-400" />,  bg: "bg-red-50"    },
-              { label: "NTV Count",         value: LEASING.ntvCount,             sub: "No notices to vacate",                                             icon: <Calendar className="h-5 w-5 text-gray-400" />,  bg: "bg-gray-50"   },
+              { label: "Applications MTD", value: LEASING.applicationsReceived, sub: `${LEASING.applicationsDenied} denied (credit)`,            icon: <Users className="h-5 w-5 text-blue-400" />,        bg: "bg-blue-50"    },
+              { label: "Move-ins MTD",      value: LEASING.moveInsMTD,           sub: `Unit ${LEASING.moveInUnit} · ${LEASING.moveInDate}`,        icon: <ArrowRight className="h-5 w-5 text-emerald-400" />, bg: "bg-emerald-50" },
+              { label: "Move-outs MTD",     value: LEASING.moveOutsMTD,          sub: `Unit ${LEASING.moveOutUnit} · ${LEASING.moveOutReason}`,     icon: <ArrowRight className="h-5 w-5 text-red-400" />,     bg: "bg-red-50"     },
+              { label: "NTV Count",         value: LEASING.ntvCount,             sub: "No notices to vacate",                                       icon: <Calendar className="h-5 w-5 text-gray-400" />,     bg: "bg-gray-50"    },
             ].map(({ label, value, sub, icon, bg }) => (
               <Card key={label} className="border-gray-200">
                 <CardContent className="pt-4 pb-3 flex items-start justify-between">
@@ -183,9 +124,9 @@ export default function TowneEastPage() {
             ))}
           </div>
 
-          {/* Occupancy + Outstanding */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
+            {/* Occupancy donut */}
             <Card className="border-gray-200">
               <CardContent className="pt-6 pb-5">
                 <h3 className="text-sm font-semibold text-gray-700 mb-4">Occupancy Rate</h3>
@@ -224,14 +165,14 @@ export default function TowneEastPage() {
               </CardContent>
             </Card>
 
+            {/* Outstanding balance */}
             <Card className="border-gray-200">
               <CardContent className="pt-6 pb-5">
                 <h3 className="text-sm font-semibold text-gray-700 mb-1">Outstanding Balance Breakdown</h3>
                 <p className="text-3xl font-bold text-gray-900 mb-1">{fmt(OUTSTANDING.total)}</p>
                 <p className="text-xs text-gray-400 mb-5">
                   Net real exposure: <span className="font-semibold text-amber-600">{fmt(NET_EXPOSURE)}</span>
-                  <span className="text-gray-300 mx-2">·</span>
-                  After seller credits + PTP
+                  <span className="text-gray-300 mx-2">·</span>After seller credits + PTP
                 </p>
                 <div className="space-y-3.5">
                   {OUTSTANDING.breakdown.map((item) => (
@@ -305,82 +246,6 @@ export default function TowneEastPage() {
           </Card>
         </section>
 
-        {/* ══ DELINQUENCY ══ */}
-        <section id="delinquency" className="scroll-mt-28">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-900">Delinquency</h2>
-            <span className="text-xs text-gray-400">Source: Current rent roll</span>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            {[
-              { label: "Total Outstanding", value: fmt(totalDelinquent), color: "text-red-600",   bg: "bg-red-50 border-red-100"     },
-              { label: "Net Real Exposure", value: fmt(NET_EXPOSURE),    color: "text-amber-600", bg: "bg-amber-50 border-amber-100" },
-              { label: "Hard Delinquency",  value: fmt(total30plus),     color: "text-red-700",   bg: "bg-red-50 border-red-100"     },
-              { label: "% of GPR",          value: `${((totalDelinquent / 106_100) * 100).toFixed(1)}%`, color: "text-red-600", bg: "bg-red-50 border-red-100" },
-            ].map(({ label, value, color, bg }) => (
-              <Card key={label} className={`border ${bg}`}>
-                <CardContent className="pt-4 pb-3">
-                  <p className="text-xs font-medium text-gray-500">{label}</p>
-                  <p className={`text-xl font-bold mt-0.5 ${color}`}>{value}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <p className="text-xs text-gray-400 mb-4 italic">
-            Net exposure = total minus $8,162 paid to prev. owner (seller crediting back) and $3,520 PTP expected this weekend.
-          </p>
-
-          <Card className="border-gray-200">
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      {["Tenant", "Unit", "Balance", "Category", "Action", "Notes"].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {DELINQUENCY.map((d) => (
-                      <tr key={d.unit} className={cn("hover:bg-gray-50", {
-                        "bg-red-50/40":   ["Eviction","Skip"].includes(d.category),
-                        "bg-amber-50/30": d.category === "PTP",
-                        "bg-blue-50/20":  d.category === "Prev Owner",
-                      })}>
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{d.tenant}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{d.unit}</td>
-                        <td className="px-4 py-2.5 font-bold text-red-600">{fmt(d.balance)}</td>
-                        <td className="px-4 py-2.5">
-                          <Badge className={cn("text-xs border", {
-                            "bg-red-100 text-red-800 border-red-200":       ["Eviction","Skip"].includes(d.category),
-                            "bg-amber-100 text-amber-800 border-amber-200": d.category === "PTP",
-                            "bg-blue-100 text-blue-800 border-blue-200":    d.category === "Prev Owner",
-                            "bg-gray-100 text-gray-600 border-gray-200":    d.category === "Pending",
-                          })}>{d.category}</Badge>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <Badge className={`text-xs border ${actionBadge(d.action)}`}>{d.action}</Badge>
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-gray-400 max-w-xs">{d.notes || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-gray-50 border-t-2 border-gray-200">
-                    <tr>
-                      <td colSpan={2} className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total</td>
-                      <td className="px-4 py-2.5 font-bold text-red-700">{fmt(totalDelinquent)}</td>
-                      <td colSpan={3} />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
         {/* ══ RENEWALS ══ */}
         <section id="renewals" className="scroll-mt-28">
           <h2 className="text-lg font-bold text-gray-900 mb-1">Renewal Pipeline</h2>
@@ -420,13 +285,13 @@ export default function TowneEastPage() {
           </p>
         </section>
 
-        {/* ══ RENOVATIONS (live Google Sheets) ══ */}
+        {/* ══ RENOVATIONS ══ */}
         <section id="renovations" className="scroll-mt-28">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Renovations</h2>
           <RenovationSection />
         </section>
 
-        {/* ══ CAPEX (live Google Sheets) ══ */}
+        {/* ══ CAPEX ══ */}
         <section id="capex" className="scroll-mt-28 pb-16">
           <h2 className="text-lg font-bold text-gray-900 mb-4">CapEx</h2>
           <CapExSection />
