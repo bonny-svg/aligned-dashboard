@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { MapPin, Home, Clock, CheckCircle2, AlertCircle, Circle } from "lucide-react";
+import React, { useState, useCallback, useEffect } from "react";
+import { MapPin, Home, Clock, CheckCircle2, AlertCircle, Circle, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-type Month = "mar" | "feb" | "jan";
+type Month = "mar";
 
 interface FinRow {
   label: string;
@@ -48,175 +48,228 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
   );
 }
 
-// ─── PLACEHOLDER DATA ─────────────────────────────────────────────────────────
+// ─── GOOGLE SHEET LIVE DATA ──────────────────────────────────────────────────
+const SHEET_ID = "1Jt9WIaON5joUPNwduptvgRb3PyjyZmsioGGP6KJudh8";
+const csvUrl = (sheet: string) =>
+  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheet)}`;
+
+interface RenoUnit {
+  unit: string;
+  floorplan: string;
+  budget: number;
+  moveOut: string;
+  walkDate: string;
+  startDate: string;
+  promiseDate: string;
+  completionDate: string;
+  leasedDate: string;
+  daysUnder: string;
+  contractor: string;
+  actualSpend: number;
+  pct: string;
+  notes: string;
+  status: "Complete" | "In Progress" | "Upcoming" | "Planned";
+}
+
+interface CapExItem {
+  item: string;
+  phase: string;
+  proposedCost: number;
+  underwriting: number;
+  actual: number;
+  notes: string;
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  const lines = text.split("\n");
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const cells: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === "," && !inQuotes) { cells.push(current.trim()); current = ""; continue; }
+      current += ch;
+    }
+    cells.push(current.trim());
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function parseMoney(s: string): number {
+  if (!s) return 0;
+  return parseFloat(s.replace(/[$,]/g, "")) || 0;
+}
+
+function parseRenoSheet(rows: string[][]): RenoUnit[] {
+  const units: RenoUnit[] = [];
+  let currentStatus: "Complete" | "In Progress" | "Upcoming" | "Planned" = "In Progress";
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const col0 = row[0] || "";
+    const unitNum = (row[1] || "").trim();
+
+    // Detect status headers
+    const col2 = (row[2] || "").trim().toLowerCase();
+    if (col2 === "completed" || col2 === "complete") { currentStatus = "Complete"; continue; }
+    if (col2 === "work in progress") { currentStatus = "In Progress"; continue; }
+    if (col2 === "upcoming") { currentStatus = "Upcoming"; continue; }
+    if (col2 === "planned") { currentStatus = "Planned"; continue; }
+
+    if (!unitNum || unitNum === "Unit") continue;
+
+    // Skip the "not renovating" unit
+    const notes = (row[14] || "").trim();
+    if (notes.toLowerCase().includes("not rennovat") || notes.toLowerCase().includes("not renovat")) continue;
+
+    units.push({
+      unit: unitNum,
+      floorplan: (row[2] || "").trim(),
+      budget: parseMoney(row[3] || ""),
+      moveOut: (row[4] || "").trim(),
+      walkDate: (row[5] || "").trim(),
+      startDate: (row[6] || "").trim(),
+      promiseDate: (row[7] || "").trim(),
+      completionDate: (row[8] || "").trim(),
+      leasedDate: (row[9] || "").trim(),
+      daysUnder: (row[10] || "").trim(),
+      contractor: (row[11] || "").trim(),
+      actualSpend: parseMoney(row[12] || ""),
+      pct: (row[13] || "").trim(),
+      notes,
+      status: currentStatus,
+    });
+  }
+  return units;
+}
+
+function parseCapExSheet(rows: string[][]): CapExItem[] {
+  const items: CapExItem[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const item = (row[0] || "").trim();
+    const phase = (row[1] || "").trim();
+    const underwriting = parseMoney(row[3] || "");
+
+    // Skip headers, subtotals, totals, legend, and empty rows
+    if (!item || !phase) continue;
+    if (item.toLowerCase().includes("subtotal") || item.toLowerCase().includes("total")) continue;
+    if (item === "LEGEND:") continue;
+    if (phase === "Phase") continue;
+
+    items.push({
+      item,
+      phase,
+      proposedCost: parseMoney(row[2] || ""),
+      underwriting,
+      actual: parseMoney(row[4] || ""),
+      notes: (row[18] || row[17] || "").trim(),
+    });
+  }
+  return items;
+}
+
+function useSheetData() {
+  const [renoUnits, setRenoUnits] = useState<RenoUnit[]>([]);
+  const [capexItems, setCapexItems] = useState<CapExItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [renoRes, capexRes] = await Promise.all([
+          fetch(csvUrl("Sheet1"), { cache: "no-store" }),
+          fetch(csvUrl("Sheet2"), { cache: "no-store" }),
+        ]);
+        const [renoText, capexText] = await Promise.all([renoRes.text(), capexRes.text()]);
+        setRenoUnits(parseRenoSheet(parseCsv(renoText)));
+        setCapexItems(parseCapExSheet(parseCsv(capexText)));
+      } catch (e) {
+        console.error("Failed to fetch sheet data:", e);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  return { renoUnits, capexItems, loading };
+}
+
+// ─── REAL FINANCIAL DATA — March 2026 (partial month, acquired 3/16/2026) ─────
+// Actuals: SunRidge Management Financial Statement, March 2026
+// Budget:  Towne East Village T12 Projected Operating Budget (March column)
 
 const INCOME: Record<Month, FinRow[]> = {
   mar: [
-    { label: "Gross Potential Rent",   actual:  89_000, budget:  89_000 },
-    { label: "Vacancy Loss",           actual:  -7_120, budget:  -5_340 },
-    { label: "Loss to Lease",          actual:  -2_670, budget:  -1_780 },
-    { label: "Concessions",            actual:    -890, budget:    -445 },
-    { label: "Delinquency",            actual:  -3_560, budget:  -1_780 },
-    { label: "Late Fees",              actual:   1_245, budget:   1_000 },
-    { label: "Other Income",           actual:   2_100, budget:   1_800 },
-  ],
-  feb: [
-    { label: "Gross Potential Rent",   actual:  89_000, budget:  89_000 },
-    { label: "Vacancy Loss",           actual:  -6_230, budget:  -5_340 },
-    { label: "Loss to Lease",          actual:  -2_450, budget:  -1_780 },
-    { label: "Concessions",            actual:    -500, budget:    -445 },
-    { label: "Delinquency",            actual:  -2_890, budget:  -1_780 },
-    { label: "Late Fees",              actual:   1_100, budget:   1_000 },
-    { label: "Other Income",           actual:   1_950, budget:   1_800 },
-  ],
-  jan: [
-    { label: "Gross Potential Rent",   actual:  89_000, budget:  89_000 },
-    { label: "Vacancy Loss",           actual:  -5_340, budget:  -5_340 },
-    { label: "Loss to Lease",          actual:  -1_780, budget:  -1_780 },
-    { label: "Concessions",            actual:    -445, budget:    -445 },
-    { label: "Delinquency",            actual:  -1_780, budget:  -1_780 },
-    { label: "Late Fees",              actual:     980, budget:   1_000 },
-    { label: "Other Income",           actual:   1_800, budget:   1_800 },
-  ],
-};
-
-const COLLECTIONS: Record<Month, FinRow[]> = {
-  mar: [
-    { label: "Total Charged",           actual:  89_000, budget:  89_000 },
-    { label: "Total Collected",         actual:  75_900, budget:  80_100 },
-    { label: "Prepaid / Credits Applied", actual: 1_200, budget:   1_000 },
-    { label: "NSF / Returned Checks",   actual:    -450, budget:    -200 },
-  ],
-  feb: [
-    { label: "Total Charged",           actual:  89_000, budget:  89_000 },
-    { label: "Total Collected",         actual:  77_800, budget:  80_100 },
-    { label: "Prepaid / Credits Applied", actual:   950, budget:   1_000 },
-    { label: "NSF / Returned Checks",   actual:    -300, budget:    -200 },
-  ],
-  jan: [
-    { label: "Total Charged",           actual:  89_000, budget:  89_000 },
-    { label: "Total Collected",         actual:  79_500, budget:  80_100 },
-    { label: "Prepaid / Credits Applied", actual: 1_000, budget:   1_000 },
-    { label: "NSF / Returned Checks",   actual:    -200, budget:    -200 },
+    { label: "Gross Potential Rent",        actual:  46_076, budget: 109_000 },
+    { label: "Loss / Gain to Leases",       actual:       0, budget:  -4_850 },
+    { label: "Vacancy Loss",                actual:       0, budget:  -5_450 },
+    { label: "Write-Offs / Bad Debt",        actual:       0, budget:  -1_562 },
+    { label: "Other Revenue",               actual:       0, budget:   7_600 },
   ],
 };
 
 const EXPENSES: Record<Month, FinRow[]> = {
   mar: [
-    { label: "Management Fee",               actual:  7_100, budget:  7_120 },
-    { label: "Repairs & Maintenance",        actual:  8_450, budget:  7_500 },
-    { label: "Make Ready / Turnover",        actual:  3_200, budget:  2_800 },
-    { label: "Landscaping & Grounds",        actual:  1_100, budget:  1_000 },
-    { label: "Pest Control",                 actual:    650, budget:    600 },
-    { label: "Insurance",                    actual:  4_200, budget:  4_200 },
-    { label: "Property Taxes",               actual:  7_800, budget:  7_800 },
-    { label: "Utilities – Water / Sewer",    actual:  3_100, budget:  2_800 },
-    { label: "Utilities – Electric (Common)", actual: 1_450, budget:  1_200 },
-    { label: "Administrative",               actual:  2_200, budget:  2_000 },
-  ],
-  feb: [
-    { label: "Management Fee",               actual:  7_120, budget:  7_120 },
-    { label: "Repairs & Maintenance",        actual:  7_800, budget:  7_500 },
-    { label: "Make Ready / Turnover",        actual:  2_500, budget:  2_800 },
-    { label: "Landscaping & Grounds",        actual:  1_000, budget:  1_000 },
-    { label: "Pest Control",                 actual:    600, budget:    600 },
-    { label: "Insurance",                    actual:  4_200, budget:  4_200 },
-    { label: "Property Taxes",               actual:  7_800, budget:  7_800 },
-    { label: "Utilities – Water / Sewer",    actual:  2_900, budget:  2_800 },
-    { label: "Utilities – Electric (Common)", actual: 1_300, budget:  1_200 },
-    { label: "Administrative",               actual:  2_050, budget:  2_000 },
-  ],
-  jan: [
-    { label: "Management Fee",               actual:  7_120, budget:  7_120 },
-    { label: "Repairs & Maintenance",        actual:  7_500, budget:  7_500 },
-    { label: "Make Ready / Turnover",        actual:  2_800, budget:  2_800 },
-    { label: "Landscaping & Grounds",        actual:  1_000, budget:  1_000 },
-    { label: "Pest Control",                 actual:    600, budget:    600 },
-    { label: "Insurance",                    actual:  4_200, budget:  4_200 },
-    { label: "Property Taxes",               actual:  7_800, budget:  7_800 },
-    { label: "Utilities – Water / Sewer",    actual:  2_800, budget:  2_800 },
-    { label: "Utilities – Electric (Common)", actual: 1_200, budget:  1_200 },
-    { label: "Administrative",               actual:  2_000, budget:  2_000 },
+    { label: "Personnel",                   actual:       0, budget: 12_514 },
+    { label: "Management Fees",             actual:       0, budget:  3_142 },
+    { label: "Administrative",              actual:       0, budget:  2_284 },
+    { label: "Leasing",                     actual:      22, budget:  2_346 },
+    { label: "Utilities",                   actual:      10, budget:  2_309 },
+    { label: "Services",                    actual:       0, budget:     42 },
+    { label: "Cleaning & Decorating",       actual:       0, budget:    975 },
+    { label: "Repairs & Maintenance",       actual:       0, budget:  2_115 },
+    { label: "Property Taxes",              actual:   3_190, budget:  7_833 },
+    { label: "Property Insurance",          actual:   4_010, budget:  4_867 },
   ],
 };
 
 const BELOW_LINE: Record<Month, FinRow[]> = {
   mar: [
-    { label: "Debt Service – Principal & Interest", actual: 18_500, budget: 18_500 },
-    { label: "Replacement Reserves",               actual:  2_000, budget:  2_000 },
-  ],
-  feb: [
-    { label: "Debt Service – Principal & Interest", actual: 18_500, budget: 18_500 },
-    { label: "Replacement Reserves",               actual:  2_000, budget:  2_000 },
-  ],
-  jan: [
-    { label: "Debt Service – Principal & Interest", actual: 18_500, budget: 18_500 },
-    { label: "Replacement Reserves",               actual:  2_000, budget:  2_000 },
+    { label: "Debt Service – Principal & Interest", actual: 14_433, budget: 25_361 },
+    { label: "Replacement Reserves",               actual:      0, budget:  2_802 },
   ],
 };
 
-// ─── DELINQUENCY DATA ─────────────────────────────────────────────────────────
-const DELINQUENCY = [
-  { tenant: "Maria Santos",     unit: "114A", balance: 5_820, aging0_30:     0, aging30plus: 5_820, action: "Eviction Filed",  notes: "Filed 2/28. Court date 3/22." },
-  { tenant: "Linda Tran",       unit: "308B", balance: 3_750, aging0_30:     0, aging30plus: 3_750, action: "Eviction Filed",  notes: "Second filing this lease term." },
-  { tenant: "James Whitfield",  unit: "203B", balance: 3_200, aging0_30: 1_600, aging30plus: 1_600, action: "Payment Plan",   notes: "Paying $400/mo extra since 3/1." },
-  { tenant: "Ashley Reyes",     unit: "241C", balance: 2_670, aging0_30:   670, aging30plus: 2_000, action: "Payment Plan",   notes: null },
-  { tenant: "Brittany Moore",   unit: "118C", balance: 2_450, aging0_30: 2_450, aging30plus:     0, action: "Notice Sent",   notes: null },
-  { tenant: "Kevin Okafor",     unit: "215A", balance: 2_100, aging0_30: 2_100, aging30plus:     0, action: "Notice Sent",   notes: null },
-  { tenant: "Darnell Brooks",   unit: "122A", balance: 1_980, aging0_30: 1_980, aging30plus:     0, action: "None",          notes: null },
-  { tenant: "Marcus Hill",      unit: "317A", balance: 1_480, aging0_30: 1_480, aging30plus:     0, action: "None",          notes: null },
+// ─── DAILY SNAPSHOT DATA (from RealPage reports, updated Apr 12, 2026) ────────
+const SNAPSHOT = {
+  asOf: "Apr 12, 2026",
+  occupancy: { occupied: 91, total: 100, pct: 91.0 },
+  collections: {
+    totalCharged: 112_486,   // Total lease charges for April fiscal period
+    totalCollected: 97_715,  // Total credits (payments) received
+    endingBalance: 34_903,   // Total outstanding balance
+  },
+  delinquency: {
+    currentRent: 16_771,     // RENT past due (current period)
+    lateFees: 10_595,        // Late fees outstanding
+    priorPeriod: 5_764,      // Prior period balances carried forward
+    badDebt: 1_853,          // Bad debt charges
+    total: 35_021,           // Net delinquent total
+  },
+};
+
+// ─── LEASE EXPIRATION / RENEWAL DATA (from OneSite, as of Apr 11, 2026) ──────
+const LEASING = [
+  { month: "Mar 2026", expiring: 13, renewed: 7, vacating: 2, mtm: 6, unknown: 0 },
+  { month: "Apr 2026", expiring:  3, renewed: 0, vacating: 1, mtm: 0, unknown: 2 },
+  { month: "May 2026", expiring:  8, renewed: 0, vacating: 0, mtm: 0, unknown: 8 },
+  { month: "Jun 2026", expiring:  6, renewed: 0, vacating: 0, mtm: 0, unknown: 6 },
 ];
 
-// ─── OCCUPANCY DATA (per month) ───────────────────────────────────────────────
+// ─── OCCUPANCY DATA (for monthly financials) ─────────────────────────────────
 const OCCUPANCY: Record<Month, { actual: number; budget: number }> = {
-  mar: { actual: 91.0, budget: 93.0 },
-  feb: { actual: 92.0, budget: 93.0 },
-  jan: { actual: 93.5, budget: 93.0 },
+  mar: { actual: 96.0, budget: 95.0 },
 };
 
-// ─── RENOVATIONS DATA ─────────────────────────────────────────────────────────
-const RENO_BY_TYPE = [
-  { type: "1 BD / 1 BA", budgetPerUnit:  5_000, avgActualPerUnit:  4_850, unitsDone:  8, unitsTotal: 15 },
-  { type: "2 BD / 1 BA", budgetPerUnit:  5_000, avgActualPerUnit:  5_120, unitsDone: 12, unitsTotal: 18 },
-  { type: "2 BD / 2 BA", budgetPerUnit: 11_000, avgActualPerUnit: 10_750, unitsDone:  5, unitsTotal:  7 },
-];
-
-const RENO_SCOPES = [
-  { scope: "Kitchen Updates",     budget: 120_000, spent:  75_000, unitsTotal: 40, unitsDone: 25 },
-  { scope: "Bathroom Refresh",    budget:  80_000, spent:  50_000, unitsTotal: 40, unitsDone: 25 },
-  { scope: "Flooring (LVP)",      budget:  60_000, spent:  40_500, unitsTotal: 40, unitsDone: 25 },
-  { scope: "Paint & Fixtures",    budget:  40_000, spent:  25_000, unitsTotal: 40, unitsDone: 25 },
-  { scope: "Appliance Package",   budget:  80_000, spent:  28_250, unitsTotal: 40, unitsDone: 10 },
-];
-
-const RENO_UNITS = [
-  { unit: "101A", scope: "Full Renovation", startDate: "Jan 15", endDate: "Feb 2",  status: "Complete",     cost: 9_800 },
-  { unit: "102B", scope: "Full Renovation", startDate: "Feb 1",  endDate: "Feb 18", status: "Complete",     cost: 9_600 },
-  { unit: "103C", scope: "Full Renovation", startDate: "Feb 14", endDate: "Mar 3",  status: "Complete",     cost: 10_100 },
-  { unit: "201A", scope: "Full Renovation", startDate: "Mar 1",  endDate: "Mar 19", status: "In Progress",  cost: 9_750 },
-  { unit: "202B", scope: "Full Renovation", startDate: "Mar 5",  endDate: "Mar 23", status: "In Progress",  cost: 9_900 },
-  { unit: "204A", scope: "Full Renovation", startDate: "Mar 18", endDate: "Apr 4",  status: "In Progress",  cost: 9_800 },
-  { unit: "301B", scope: "Full Renovation", startDate: "Mar 25", endDate: "Apr 12", status: "Planned",      cost: 9_950 },
-  { unit: "302C", scope: "Full Renovation", startDate: "Apr 1",  endDate: "Apr 19", status: "Planned",      cost: 9_800 },
-];
-
-// ─── CAPEX DATA ───────────────────────────────────────────────────────────────
-const CAPEX_PROJECTS = [
-  { item: "Building C Roof Replacement", budget: 45_000, spent: 38_250, pct: 85, status: "In Progress" },
-  { item: "HVAC Replacements (5 units)", budget: 18_500, spent: 18_500, pct: 100, status: "Completed"  },
-  { item: "Security Camera System",      budget: 12_000, spent: 12_000, pct: 100, status: "Completed"  },
-  { item: "Pool Resurfacing & Equipment",budget: 22_000, spent:  3_200, pct: 15,  status: "In Progress" },
-  { item: "Parking Lot Seal & Stripe",   budget:  8_500, spent:      0, pct: 0,   status: "On Hold"     },
-];
-
-const WORK_ORDERS = [
-  { wo: "WO-2001", unit: "114B", cat: "HVAC",      desc: "AC not cooling — possible refrigerant leak",  vendor: "6/1 HVAC Services",   cost: 380,   status: "In Progress" },
-  { wo: "WO-2002", unit: "228A", cat: "Plumbing",   desc: "Leak under kitchen sink",                    vendor: "SplashPro Plumbing",  cost: 175,   status: "Open"        },
-  { wo: "WO-2003", unit: "301C", cat: "Electrical", desc: "GFCI outlet replacement (bathroom)",         vendor: "QuickFix Electric",   cost: 120,   status: "Completed"   },
-  { wo: "WO-2004", unit: "105A", cat: "Appliance",  desc: "Dishwasher not draining",                    vendor: "All Pro Appliance",   cost: 250,   status: "Open"        },
-  { wo: "WO-2005", unit: "210B", cat: "Make Ready", desc: "Full unit turn — paint, clean, carpet",      vendor: "In-house",            cost: 1_200, status: "In Progress" },
-  { wo: "WO-2006", unit: "317A", cat: "Plumbing",   desc: "Running toilet, slow drain in master bath",  vendor: "SplashPro Plumbing",  cost: 195,   status: "Open"        },
-];
+// ─── RENOVATIONS & CAPEX — pulled live from Google Sheets ────────────────────
+// Sheet: https://docs.google.com/spreadsheets/d/1Jt9WIaON5joUPNwduptvgRb3PyjyZmsioGGP6KJudh8
 
 // ─── STATUS HELPERS ───────────────────────────────────────────────────────────
 function capexStatusBadge(s: string): string {
@@ -307,32 +360,26 @@ function SummaryRow({ label, actual, budget }: { label: string; actual: number; 
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TowneEastPage() {
-  const [month, setMonth] = useState<Month>("mar");
+  const [month] = useState<Month>("mar");
+  const { renoUnits, capexItems, loading: sheetsLoading } = useSheetData();
 
   const scrollTo = useCallback((id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
   const income      = INCOME[month];
-  const collections = COLLECTIONS[month];
   const expenses    = EXPENSES[month];
   const belowLine   = BELOW_LINE[month];
 
   const incomeSum      = sum(income);
-  const collectionsSum = sum(collections);
   const expensesSum    = sum(expenses);
   const belowLineSum   = sum(belowLine);
 
   const egi = { actual: incomeSum.actual, budget: incomeSum.budget };
   const noi = { actual: egi.actual - expensesSum.actual, budget: egi.budget - expensesSum.budget };
   const ncf = { actual: noi.actual - belowLineSum.actual, budget: noi.budget - belowLineSum.budget };
-  const netCollections = { actual: collectionsSum.actual, budget: collectionsSum.budget };
 
   const occupancy        = OCCUPANCY[month];
-  const gpr              = 89_000;
-  const delinqItem       = income.find((r) => r.label === "Delinquency");
-  const delinqActualPct  = delinqItem ? (Math.abs(delinqItem.actual)  / gpr) * 100 : 0;
-  const delinqBudgetPct  = delinqItem ? (Math.abs(delinqItem.budget) / gpr) * 100 : 0;
 
   const debtServiceActual = belowLine
     .filter((r) => r.label.toLowerCase().includes("debt service"))
@@ -340,13 +387,17 @@ export default function TowneEastPage() {
   const dscr             = debtServiceActual > 0 ? noi.actual / debtServiceActual : null;
   const expenseRatio     = egi.actual > 0 ? (expensesSum.actual / egi.actual) * 100 : null;
 
-  const totalDelinquent  = DELINQUENCY.reduce((s, d) => s + d.balance, 0);
-  const total30plus      = DELINQUENCY.reduce((s, d) => s + d.aging30plus, 0);
-  const totalRenoSpent   = RENO_SCOPES.reduce((s, r) => s + r.spent, 0);
-  const totalRenoBudget  = RENO_SCOPES.reduce((s, r) => s + r.budget, 0);
-  const totalCapexBudget = CAPEX_PROJECTS.reduce((s, p) => s + p.budget, 0);
-  const totalCapexSpent  = CAPEX_PROJECTS.reduce((s, p) => s + p.spent, 0);
-  const openWOs          = WORK_ORDERS.filter((w) => w.status !== "Completed").length;
+  // Renovation computed values from live sheet
+  const renoInProgress = renoUnits.filter((u) => u.status === "In Progress");
+  const renoComplete   = renoUnits.filter((u) => u.status === "Complete");
+  const renoUpcoming   = renoUnits.filter((u) => u.status === "Upcoming" || u.status === "Planned");
+  const totalRenoSpent = renoUnits.reduce((s, u) => s + u.actualSpend, 0);
+  const totalRenoBudget = renoUnits.reduce((s, u) => s + u.budget, 0);
+
+  // CapEx computed values from live sheet
+  const capexPhases = ["Immediate", "Unit Renovations", "Year 1", "As-Needed", "Reserves / Ongoing 12+ Months"];
+  const totalCapexBudget = capexItems.reduce((s, c) => s + c.underwriting, 0);
+  const totalCapexActual = capexItems.reduce((s, c) => s + c.actual, 0);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -373,14 +424,14 @@ export default function TowneEastPage() {
                 </span>
                 <span className="flex items-center gap-1">
                   <Clock className="h-3.5 w-3.5" />
-                  Updated Mar 18, 2025 9:30 AM
+                  Financials as of Mar 31, 2026
                 </span>
               </div>
             </div>
           </div>
           {/* Section nav */}
           <nav className="flex gap-0 -mb-px overflow-x-auto">
-            {(["Financials", "Delinquency", "Renovations", "CapEx"] as const).map((label) => (
+            {(["Snapshot", "Financials", "Leasing", "Renovations", "CapEx"] as const).map((label) => (
               <button
                 key={label}
                 onClick={() => scrollTo(label.toLowerCase())}
@@ -397,30 +448,117 @@ export default function TowneEastPage() {
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-14">
 
         {/* ══════════════════════════════════════════════════════════════════
-            SECTION 1 · FINANCIALS
+            SECTION 1 · DAILY SNAPSHOT
+        ══════════════════════════════════════════════════════════════════ */}
+        <section id="snapshot" className="scroll-mt-28">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-900">Property Snapshot</h2>
+            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+              Updated {SNAPSHOT.asOf}
+            </span>
+          </div>
+
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Occupancy</p>
+                <p className={cn("text-2xl font-bold mt-1", SNAPSHOT.occupancy.pct >= 95 ? "text-emerald-600" : "text-amber-600")}>
+                  {SNAPSHOT.occupancy.pct}%
+                </p>
+                <p className="text-xs text-gray-400 mt-1">{SNAPSHOT.occupancy.occupied} / {SNAPSHOT.occupancy.total} units</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Charged</p>
+                <p className="text-2xl font-bold mt-1 text-gray-900">{fmt(SNAPSHOT.collections.totalCharged)}</p>
+                <p className="text-xs text-gray-400 mt-1">April lease charges</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-gray-200">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Collected</p>
+                <p className="text-2xl font-bold mt-1 text-emerald-600">{fmt(SNAPSHOT.collections.totalCollected)}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {((SNAPSHOT.collections.totalCollected / SNAPSHOT.collections.totalCharged) * 100).toFixed(1)}% of charged
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-red-100 bg-red-50/30">
+              <CardContent className="pt-4 pb-3">
+                <p className="text-xs font-semibold text-red-500 uppercase tracking-wide">Delinquent Balance</p>
+                <p className="text-2xl font-bold mt-1 text-red-600">{fmt(SNAPSHOT.collections.endingBalance)}</p>
+                <p className="text-xs text-red-400 mt-1">All outstanding balances</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Delinquency breakdown */}
+          <Card className="border-gray-200">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">% of Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {[
+                      { label: "Current Month Rent Past Due", amount: SNAPSHOT.delinquency.currentRent },
+                      { label: "Late Fees Outstanding",       amount: SNAPSHOT.delinquency.lateFees },
+                      { label: "Prior Period Balances",        amount: SNAPSHOT.delinquency.priorPeriod },
+                      { label: "Bad Debt Charges",             amount: SNAPSHOT.delinquency.badDebt },
+                    ].map((row) => (
+                      <tr key={row.label} className="hover:bg-gray-50/60">
+                        <td className="px-4 py-2.5 text-sm text-gray-700">{row.label}</td>
+                        <td className="px-4 py-2.5 text-sm text-right font-medium text-red-600">{fmt(row.amount)}</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-gray-500">
+                          {((row.amount / SNAPSHOT.delinquency.total) * 100).toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-800">
+                    <tr>
+                      <td className="px-4 py-2.5 text-sm font-bold text-white">Total Delinquent</td>
+                      <td className="px-4 py-2.5 text-sm text-right font-bold text-red-400">{fmt(SNAPSHOT.delinquency.total)}</td>
+                      <td className="px-4 py-2.5 text-sm text-right font-bold text-gray-300">100%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════════════
+            SECTION 2 · FINANCIALS (Monthly)
         ══════════════════════════════════════════════════════════════════ */}
         <section id="financials" className="scroll-mt-28">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Financials — Actuals vs. Budget</h2>
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-900">Financials — Actuals vs. Budget</h2>
+            <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-1">
+              Updated monthly — last report: March 2026
+            </span>
+          </div>
 
           {/* Month tabs */}
-          <div className="flex gap-1 border-b border-gray-200 mb-5">
-            {(["mar", "feb", "jan"] as Month[]).map((m) => {
-              const labels: Record<Month, string> = { mar: "Mar 2025", feb: "Feb 2025", jan: "Jan 2025" };
-              return (
-                <button
-                  key={m}
-                  onClick={() => setMonth(m)}
-                  className={cn(
-                    "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-                    month === m
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  )}
-                >
-                  {labels[m]}
-                </button>
-              );
-            })}
+          <div className="flex items-center gap-4 border-b border-gray-200 mb-5">
+            <button
+              className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600"
+            >
+              Mar 2026
+            </button>
+            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              Partial month — acquired 3/16/2026
+            </span>
           </div>
 
           {/* KPI cards — 5 metrics */}
@@ -454,16 +592,16 @@ export default function TowneEastPage() {
               </CardContent>
             </Card>
 
-            {/* 3 · Delinquency % of GPR */}
+            {/* 3 · Net Cash Flow */}
             <Card className="border-gray-200">
               <CardContent className="pt-4 pb-3">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Delinquency %</p>
-                <p className={cn("text-2xl font-bold mt-1", delinqActualPct <= delinqBudgetPct ? "text-emerald-600" : "text-red-600")}>
-                  {delinqActualPct.toFixed(1)}%
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Net Cash Flow</p>
+                <p className={cn("text-2xl font-bold mt-1", ncf.actual >= 0 ? "text-emerald-600" : "text-red-600")}>
+                  {fmt(ncf.actual)}
                 </p>
-                <p className="text-xs text-gray-400 mt-1.5">Bgt {delinqBudgetPct.toFixed(1)}%</p>
-                <p className={cn("text-xs font-semibold mt-0.5", (delinqActualPct - delinqBudgetPct) <= 0 ? "text-emerald-600" : "text-red-500")}>
-                  {(delinqActualPct - delinqBudgetPct) >= 0 ? "+" : ""}{(delinqActualPct - delinqBudgetPct).toFixed(1)}pp
+                <p className="text-xs text-gray-400 mt-1.5">Bgt {fmt(ncf.budget)}</p>
+                <p className={cn("text-xs font-semibold mt-0.5", varColor(ncf.actual - ncf.budget, false))}>
+                  {varStr(ncf.actual - ncf.budget)}
                 </p>
               </CardContent>
             </Card>
@@ -526,13 +664,6 @@ export default function TowneEastPage() {
                       row={{ label: "Total Effective Gross Income", actual: egi.actual, budget: egi.budget, isSummary: true }}
                     />
 
-                    {/* COLLECTIONS */}
-                    <SectionHeader label="Collections" colorClass="bg-teal-50/60 text-teal-700" />
-                    {collections.map((r) => <FinRow key={r.label} row={r} />)}
-                    <FinRow
-                      row={{ label: "Net Collections", actual: netCollections.actual, budget: netCollections.budget, isSummary: true }}
-                    />
-
                     {/* EXPENSES */}
                     <SectionHeader label="Operating Expenses" colorClass="bg-amber-50/60 text-amber-700" />
                     {expenses.map((r) => <FinRow key={r.label} row={r} isExpense />)}
@@ -562,36 +693,47 @@ export default function TowneEastPage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════
-            SECTION 2 · DELINQUENCY
+            SECTION 3 · LEASING
         ══════════════════════════════════════════════════════════════════ */}
-        <section id="delinquency" className="scroll-mt-28">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Delinquency</h2>
+        <section id="leasing" className="scroll-mt-28">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-900">Lease Expirations & Renewals</h2>
+            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+              Updated {SNAPSHOT.asOf}
+            </span>
+          </div>
 
-          {/* Summary bar */}
+          {/* Summary KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {[
-              { label: "Total Delinquent",   value: fmt(totalDelinquent),            color: "text-red-600"    },
-              { label: "Delinquent Units",    value: `${DELINQUENCY.length} / 100`,  color: "text-red-600"    },
-              { label: "30+ Days Past Due",   value: fmt(total30plus),               color: "text-red-700"    },
-              { label: "Delinquency Rate",    value: `${((totalDelinquent / 89_000) * 100).toFixed(1)}%`, color: "text-red-600" },
-            ].map(({ label, value, color }) => (
-              <Card key={label} className="border-red-100 bg-red-50/40">
+            {(() => {
+              const totalExpiring = LEASING.reduce((s, l) => s + l.expiring, 0);
+              const totalRenewed  = LEASING.reduce((s, l) => s + l.renewed, 0);
+              const totalVacating = LEASING.reduce((s, l) => s + l.vacating, 0);
+              const totalUnknown  = LEASING.reduce((s, l) => s + l.unknown, 0);
+              return [
+                { label: "Expiring (Mar–Jun)",  value: `${totalExpiring} leases`, color: "text-gray-900" },
+                { label: "Renewed",             value: `${totalRenewed}`,         color: "text-emerald-600" },
+                { label: "Vacating / NTV",      value: `${totalVacating}`,        color: "text-red-600" },
+                { label: "Pending / Unknown",   value: `${totalUnknown + LEASING.reduce((s, l) => s + l.mtm, 0)}`, color: "text-amber-600" },
+              ];
+            })().map(({ label, value, color }) => (
+              <Card key={label} className="border-gray-200">
                 <CardContent className="pt-4 pb-3">
-                  <p className="text-xs font-medium text-red-500">{label}</p>
+                  <p className="text-xs font-medium text-gray-500">{label}</p>
                   <p className={cn("text-xl font-bold mt-0.5", color)}>{value}</p>
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          {/* Delinquency table */}
+          {/* Month-by-month breakdown */}
           <Card className="border-gray-200">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {["Tenant", "Unit", "Balance", "0–30 Days", "30+ Days", "Action Status"].map((h) => (
+                      {["Month", "Expiring", "Renewed", "Vacating", "MTM", "Unknown"].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
                           {h}
                         </th>
@@ -599,51 +741,41 @@ export default function TowneEastPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {DELINQUENCY.map((d) => (
-                      <>
-                        <tr key={d.unit} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-3 font-medium text-gray-900">{d.tenant}</td>
-                          <td className="px-4 py-3 text-gray-600 font-mono text-xs">{d.unit}</td>
-                          <td className="px-4 py-3 font-bold text-red-600">{fmt(d.balance)}</td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {d.aging0_30 > 0 ? fmt(d.aging0_30) : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="px-4 py-3">
-                            {d.aging30plus > 0 ? (
-                              <span className="font-semibold text-red-600">{fmt(d.aging30plus)}</span>
-                            ) : (
-                              <span className="text-gray-300">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Badge className={cn("text-xs border", {
-                              "bg-red-100 text-red-800 border-red-200":       d.action === "Eviction Filed",
-                              "bg-amber-100 text-amber-800 border-amber-200": d.action === "Payment Plan",
-                              "bg-blue-100 text-blue-800 border-blue-200":    d.action === "Notice Sent",
-                              "bg-gray-100 text-gray-600 border-gray-200":    d.action === "None",
-                            })}>
-                              {d.action}
-                            </Badge>
-                          </td>
-                        </tr>
-                        {d.notes && (
-                          <tr key={`${d.unit}-notes`} className="bg-amber-50/40">
-                            <td />
-                            <td colSpan={5} className="px-4 py-1.5 text-xs text-gray-500 italic">{d.notes}</td>
-                          </tr>
-                        )}
-                      </>
+                    {LEASING.map((row) => (
+                      <tr key={row.month} className="hover:bg-gray-50/60">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.month}</td>
+                        <td className="px-4 py-3 text-sm font-bold text-gray-900">{row.expiring}</td>
+                        <td className="px-4 py-3 text-sm">
+                          {row.renewed > 0
+                            ? <span className="font-semibold text-emerald-600">{row.renewed}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {row.vacating > 0
+                            ? <span className="font-semibold text-red-600">{row.vacating}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {row.mtm > 0
+                            ? <span className="font-semibold text-amber-600">{row.mtm}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {row.unknown > 0
+                            ? <span className="font-semibold text-amber-600">{row.unknown}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr>
-                      <td colSpan={2} className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total</td>
-                      <td className="px-4 py-2.5 font-bold text-red-700">{fmt(totalDelinquent)}</td>
-                      <td className="px-4 py-2.5 font-bold text-gray-700">
-                        {fmt(DELINQUENCY.reduce((s, d) => s + d.aging0_30, 0))}
-                      </td>
-                      <td className="px-4 py-2.5 font-bold text-red-700">{fmt(total30plus)}</td>
-                      <td />
+                      <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total</td>
+                      <td className="px-4 py-2.5 font-bold text-gray-900">{LEASING.reduce((s, l) => s + l.expiring, 0)}</td>
+                      <td className="px-4 py-2.5 font-bold text-emerald-600">{LEASING.reduce((s, l) => s + l.renewed, 0)}</td>
+                      <td className="px-4 py-2.5 font-bold text-red-600">{LEASING.reduce((s, l) => s + l.vacating, 0)}</td>
+                      <td className="px-4 py-2.5 font-bold text-amber-600">{LEASING.reduce((s, l) => s + l.mtm, 0)}</td>
+                      <td className="px-4 py-2.5 font-bold text-amber-600">{LEASING.reduce((s, l) => s + l.unknown, 0)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -653,256 +785,211 @@ export default function TowneEastPage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════
-            SECTION 3 · RENOVATIONS
+            SECTION 4 · RENOVATIONS (Live from Google Sheets)
         ══════════════════════════════════════════════════════════════════ */}
         <section id="renovations" className="scroll-mt-28">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Renovations</h2>
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-900">Unit Renovations</h2>
+            <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+              Live from Google Sheets
+            </span>
+          </div>
 
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {[
-              { label: "Units Planned",    value: "40 units",          color: "text-gray-900" },
-              { label: "Units Complete",   value: "25 of 40",          color: "text-emerald-600" },
-              { label: "Total Budget",     value: fmt(totalRenoBudget), color: "text-gray-900" },
-              { label: "Total Spent",      value: fmt(totalRenoSpent),  color: "text-blue-700" },
-            ].map(({ label, value, color }) => (
-              <Card key={label} className="border-gray-200">
-                <CardContent className="pt-4 pb-3">
-                  <p className="text-xs font-medium text-gray-500">{label}</p>
-                  <p className={cn("text-xl font-bold mt-0.5", color)}>{value}</p>
+          {sheetsLoading ? (
+            <Card className="border-gray-200">
+              <CardContent className="py-12 flex items-center justify-center gap-2 text-gray-400">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Loading renovation data...</span>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {/* Summary KPIs */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                {[
+                  { label: "Total Units",     value: `${renoUnits.length}`, color: "text-gray-900" },
+                  { label: "In Progress",      value: `${renoInProgress.length}`, color: "text-blue-600" },
+                  { label: "Upcoming",         value: `${renoUpcoming.length}`, color: "text-amber-600" },
+                  { label: "Complete",         value: `${renoComplete.length}`, color: "text-emerald-600" },
+                ].map(({ label, value, color }) => (
+                  <Card key={label} className="border-gray-200">
+                    <CardContent className="pt-4 pb-3">
+                      <p className="text-xs font-medium text-gray-500">{label}</p>
+                      <p className={cn("text-xl font-bold mt-0.5", color)}>{value}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Unit status breakdown */}
+              <Card className="border-gray-200 mb-5">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold text-gray-700">Status Breakdown</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {[
+                    { label: "Complete",    count: renoComplete.length,   color: "bg-emerald-500" },
+                    { label: "In Progress", count: renoInProgress.length, color: "bg-blue-500"    },
+                    { label: "Upcoming",    count: renoUpcoming.length,   color: "bg-amber-400"   },
+                  ].map(({ label, count, color }) => (
+                    <div key={label} className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
+                      <div className="flex items-center gap-2.5">
+                        <div className={cn("h-3 w-3 rounded-full", color)} />
+                        <span className="text-sm text-gray-700">{label}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-24 h-2 rounded-full bg-gray-100 overflow-hidden">
+                          <div className={cn("h-full rounded-full", color)} style={{ width: `${renoUnits.length > 0 ? (count / renoUnits.length) * 100 : 0}%` }} />
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900 w-8 text-right">{count}</span>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-xs text-gray-400 mt-3 text-center">{renoUnits.length} units in renovation pipeline</p>
                 </CardContent>
               </Card>
-            ))}
-          </div>
 
-          <div className="grid md:grid-cols-2 gap-5">
-            {/* Avg Spend by Unit Type */}
-            <Card className="border-gray-200">
-              <CardHeader className="pb-0">
-                <CardTitle className="text-sm font-semibold text-gray-700">Avg Spend by Unit Type</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        {["Unit Type", "Budget / Unit", "Avg Actual / Unit", "Variance / Unit", "Units Done", "Status"].map((h) => (
-                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {RENO_BY_TYPE.map((row) => {
-                        const variance = row.avgActualPerUnit - row.budgetPerUnit;
-                        const isOver   = variance > 0;
-                        return (
-                          <tr key={row.type} className="hover:bg-gray-50">
-                            <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{row.type}</td>
-                            <td className="px-3 py-2.5 text-gray-500">{fmt(row.budgetPerUnit)}</td>
-                            <td className="px-3 py-2.5 font-medium text-gray-900">{fmt(row.avgActualPerUnit)}</td>
-                            <td className={cn("px-3 py-2.5 font-semibold", isOver ? "text-red-500" : "text-emerald-600")}>
-                              {isOver ? "+" : ""}{fmt(variance)}
+              {/* Unit log */}
+              <Card className="border-gray-200">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-sm font-semibold text-gray-700">Unit Renovation Log</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          {["Unit", "Floorplan", "Move-Out", "Start", "Promise", "Status", "Budget", "Notes"].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {renoUnits.map((u) => (
+                          <tr key={u.unit} className="hover:bg-gray-50">
+                            <td className="px-4 py-2.5 font-mono text-xs font-semibold text-gray-800">{u.unit}</td>
+                            <td className="px-4 py-2.5 text-gray-600">{u.floorplan}</td>
+                            <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{u.moveOut || "—"}</td>
+                            <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{u.startDate || "—"}</td>
+                            <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{u.promiseDate || "—"}</td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-1.5">
+                                {renoStatusIcon(u.status)}
+                                <Badge className={cn("text-xs border", renoStatusBadge(u.status))}>
+                                  {u.status}
+                                </Badge>
+                              </div>
                             </td>
-                            <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
-                              {row.unitsDone} of {row.unitsTotal}
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <Badge className={cn("text-xs border", isOver
-                                ? "bg-red-100 text-red-800 border-red-200"
-                                : "bg-emerald-100 text-emerald-800 border-emerald-200"
-                              )}>
-                                {isOver ? "Over Budget" : "On Budget"}
-                              </Badge>
-                            </td>
+                            <td className="px-4 py-2.5 font-medium text-gray-900">{u.budget > 0 ? fmt(u.budget) : "—"}</td>
+                            <td className="px-4 py-2.5 text-xs text-gray-500 max-w-[250px] truncate" title={u.notes}>{u.notes || "—"}</td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="px-4 py-3 border-t border-gray-100 space-y-1">
-                  {RENO_BY_TYPE.map((row) => (
-                    <p key={row.type} className="text-xs text-gray-500">
-                      <span className="font-medium text-gray-700">{row.type}</span>
-                      {" "}— {row.unitsDone} of {row.unitsTotal} units completed · avg {fmt(row.avgActualPerUnit)} / unit
-                    </p>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Unit status breakdown */}
-            <Card className="border-gray-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold text-gray-700">Unit Status Breakdown</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {[
-                  { label: "Complete",    count: 25, color: "bg-emerald-500" },
-                  { label: "In Progress", count: 3,  color: "bg-blue-500"    },
-                  { label: "Planned",     count: 2,  color: "bg-gray-300"    },
-                  { label: "Not Started", count: 70, color: "bg-gray-100 border border-gray-200" },
-                ].map(({ label, count, color }) => (
-                  <div key={label} className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
-                    <div className="flex items-center gap-2.5">
-                      <div className={cn("h-3 w-3 rounded-full", color)} />
-                      <span className="text-sm text-gray-700">{label}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="w-24 h-2 rounded-full bg-gray-100 overflow-hidden">
-                        <div
-                          className={cn("h-full rounded-full", color)}
-                          style={{ width: `${(count / 100) * 100}%` }}
-                        />
-                      </div>
-                      <span className="text-sm font-semibold text-gray-900 w-8 text-right">{count}</span>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-                <p className="text-xs text-gray-400 mt-3 text-center">100 total units · 40 in renovation plan</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Unit log */}
-          <Card className="border-gray-200 mt-5">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-sm font-semibold text-gray-700">Unit Renovation Log</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      {["Unit", "Scope", "Start", "Est. Complete", "Status", "Est. Cost"].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {RENO_UNITS.map((u) => (
-                      <tr key={u.unit} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 font-mono text-xs font-semibold text-gray-800">{u.unit}</td>
-                        <td className="px-4 py-2.5 text-gray-700">{u.scope}</td>
-                        <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{u.startDate}</td>
-                        <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{u.endDate}</td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-1.5">
-                            {renoStatusIcon(u.status)}
-                            <Badge className={cn("text-xs border", renoStatusBadge(u.status))}>
-                              {u.status}
-                            </Badge>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{fmt(u.cost)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </section>
 
         {/* ══════════════════════════════════════════════════════════════════
-            SECTION 4 · CAPEX
+            SECTION 5 · CAPEX (Live from Google Sheets)
         ══════════════════════════════════════════════════════════════════ */}
         <section id="capex" className="scroll-mt-28 pb-16">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">CapEx</h2>
-
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {[
-              { label: "CapEx Budget",       value: fmt(totalCapexBudget), color: "text-gray-900" },
-              { label: "CapEx Spent",        value: fmt(totalCapexSpent),  color: totalCapexSpent > totalCapexBudget ? "text-red-600" : "text-gray-900" },
-              { label: "Remaining",          value: fmt(totalCapexBudget - totalCapexSpent), color: "text-blue-700" },
-              { label: "Open Work Orders",   value: `${openWOs} open`,    color: openWOs > 3 ? "text-amber-600" : "text-gray-900" },
-            ].map(({ label, value, color }) => (
-              <Card key={label} className="border-gray-200">
-                <CardContent className="pt-4 pb-3">
-                  <p className="text-xs font-medium text-gray-500">{label}</p>
-                  <p className={cn("text-xl font-bold mt-0.5", color)}>{value}</p>
-                </CardContent>
-              </Card>
-            ))}
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-900">CapEx</h2>
+            <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+              Live from Google Sheets
+            </span>
           </div>
 
-          {/* CapEx projects */}
-          <Card className="border-gray-200 mb-5">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-gray-700">Capital Projects</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {CAPEX_PROJECTS.map((p) => (
-                <div key={p.item}>
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-800">{p.item}</span>
-                      <Badge className={cn("text-xs border", capexStatusBadge(p.status))}>{p.status}</Badge>
-                    </div>
-                    <span className="text-xs text-gray-500">
-                      {fmt(p.spent)} / {fmt(p.budget)} · {p.pct}%
-                    </span>
-                  </div>
-                  <div className="h-2.5 w-full rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className={cn("h-full rounded-full transition-all", {
-                        "bg-emerald-500": p.pct >= 100,
-                        "bg-blue-500":    p.pct >= 50 && p.pct < 100,
-                        "bg-amber-500":   p.pct >= 20 && p.pct < 50,
-                        "bg-gray-300":    p.pct < 20,
-                      })}
-                      style={{ width: `${Math.min(100, p.pct)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          {sheetsLoading ? (
+            <Card className="border-gray-200">
+              <CardContent className="py-12 flex items-center justify-center gap-2 text-gray-400">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Loading CapEx data...</span>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {/* Summary KPIs */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+                {[
+                  { label: "Total CapEx Budget",  value: fmt(totalCapexBudget), color: "text-gray-900" },
+                  { label: "Total Actual Spent",   value: fmt(totalCapexActual), color: totalCapexActual > 0 ? "text-blue-700" : "text-gray-400" },
+                  { label: "Line Items",           value: `${capexItems.length}`, color: "text-gray-900" },
+                ].map(({ label, value, color }) => (
+                  <Card key={label} className="border-gray-200">
+                    <CardContent className="pt-4 pb-3">
+                      <p className="text-xs font-medium text-gray-500">{label}</p>
+                      <p className={cn("text-xl font-bold mt-0.5", color)}>{value}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
 
-          {/* Work orders */}
-          <Card className="border-gray-200">
-            <CardHeader className="pb-0">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold text-gray-700">Work Orders</CardTitle>
-                <span className="text-xs text-gray-400">{openWOs} open</span>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      {["WO #", "Unit", "Category", "Description", "Vendor", "Est. Cost", "Status"].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {WORK_ORDERS.map((wo) => (
-                      <tr key={wo.wo} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{wo.wo}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs font-semibold text-gray-800">{wo.unit}</td>
-                        <td className="px-4 py-2.5 text-gray-600">{wo.cat}</td>
-                        <td className="px-4 py-2.5 text-gray-800 max-w-[220px] truncate">{wo.desc}</td>
-                        <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{wo.vendor}</td>
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{fmt(wo.cost)}</td>
-                        <td className="px-4 py-2.5">
-                          <Badge className={cn("text-xs border", woStatusBadge(wo.status))}>{wo.status}</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+              {/* CapEx items by phase */}
+              <Card className="border-gray-200">
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          {["Item", "Phase", "Underwriting", "Actual", "Notes"].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {capexPhases.map((phase) => {
+                          const phaseItems = capexItems.filter((c) => c.phase === phase);
+                          if (phaseItems.length === 0) return null;
+                          const phaseTotal = phaseItems.reduce((s, c) => s + c.underwriting, 0);
+                          const phaseColor =
+                            phase === "Immediate" ? "bg-red-50/60 text-red-700" :
+                            phase === "Unit Renovations" ? "bg-blue-50/60 text-blue-700" :
+                            phase === "Year 1" ? "bg-amber-50/60 text-amber-700" :
+                            phase === "As-Needed" ? "bg-purple-50/60 text-purple-700" :
+                            "bg-slate-50/60 text-slate-600";
+                          return (
+                            <React.Fragment key={phase}>
+                              <tr className={cn("border-t-2 border-gray-200", phaseColor)}>
+                                <td colSpan={2} className="px-4 py-2 text-xs font-bold uppercase tracking-wider">{phase}</td>
+                                <td className="px-4 py-2 text-xs font-bold text-right">{fmt(phaseTotal)}</td>
+                                <td colSpan={2} />
+                              </tr>
+                              {phaseItems.map((c) => (
+                                <tr key={c.item} className="border-t border-gray-100 hover:bg-gray-50/60">
+                                  <td className="px-4 py-2.5 pl-8 text-sm text-gray-700">{c.item}</td>
+                                  <td className="px-4 py-2.5 text-xs text-gray-400">{c.phase}</td>
+                                  <td className="px-4 py-2.5 text-sm text-right font-medium text-gray-900">{fmt(c.underwriting)}</td>
+                                  <td className="px-4 py-2.5 text-sm text-right font-medium text-gray-600">{c.actual > 0 ? fmt(c.actual) : "—"}</td>
+                                  <td className="px-4 py-2.5 text-xs text-gray-500 max-w-[300px] truncate" title={c.notes}>{c.notes || "—"}</td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-gray-800">
+                        <tr>
+                          <td colSpan={2} className="px-4 py-3 text-sm font-bold text-white">Total CapEx</td>
+                          <td className="px-4 py-3 text-sm text-right font-bold text-white">{fmt(totalCapexBudget)}</td>
+                          <td className="px-4 py-3 text-sm text-right font-bold text-gray-300">{totalCapexActual > 0 ? fmt(totalCapexActual) : "—"}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </section>
       </main>
     </div>
