@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/bonny/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/2024e2d1-63eb-4203-aec3-8c93b7a73749/b726a0b8-3892-419c-ba85-0b910c597ae1/skills/pdf/**)",
+      "Bash(python -c \":*)",
+      "Bash(where python3:*)",
+      "Bash(where python:*)",
+      "Bash(ls /c/Python*/python.exe)",
+      "Read(//c/Users/bonny/AppData/Local/Programs/**)",
+      "Bash(py --version)",
+      "Bash(node -e \"console.log\\(''node works''\\)\")",
+      "Bash(npm list:*)",
+      "Bash(npm install:*)",
+      "Bash(node -e \":*)",
+      "Bash(npx next:*)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}
