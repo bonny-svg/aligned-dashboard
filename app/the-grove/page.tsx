@@ -62,6 +62,7 @@ export default function TheGrovePage() {
   const [serverSnapshot, setServerSnapshot] = useState<ServerSnapshot | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("loading");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [blobConfigured, setBlobConfigured] = useState<boolean | null>(null);
 
   // Hydration: load baseline + history + most-recent server snapshot
   useEffect(() => {
@@ -73,7 +74,11 @@ export default function TheGrovePage() {
       try {
         const res = await fetch("/api/grove/snapshot", { cache: "no-store" });
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
-        const data = (await res.json()) as { snapshot: ServerSnapshot | null };
+        const data = (await res.json()) as {
+          snapshot: ServerSnapshot | null;
+          configured?: boolean;
+        };
+        setBlobConfigured(data.configured ?? true);
         if (data.snapshot) {
           setServerSnapshot(data.snapshot);
           // Download the 3 files in parallel, turn into buffers, populate `files`.
@@ -91,6 +96,7 @@ export default function TheGrovePage() {
         setSyncStatus("idle");
       } catch (err) {
         setSyncStatus("idle");
+        setBlobConfigured(false);
         setSyncError(err instanceof Error ? err.message : "Failed to load shared snapshot");
       }
     })();
@@ -129,6 +135,10 @@ export default function TheGrovePage() {
         return;
       }
 
+      // If Vercel Blob isn't set up yet, skip the server upload entirely —
+      // the setup banner explains why. Files still parse locally.
+      if (blobConfigured === false) return;
+
       setSyncStatus("uploading");
       setSyncError(null);
       try {
@@ -146,7 +156,7 @@ export default function TheGrovePage() {
         setSyncError(err instanceof Error ? err.message : "Upload failed");
       }
     },
-    [serverSnapshot, files.rentRoll]
+    [serverSnapshot, files.rentRoll, blobConfigured]
   );
 
   const metrics = useMemo<GroveMetrics>(() => {
@@ -267,7 +277,12 @@ export default function TheGrovePage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <SyncBadge status={syncStatus} snapshot={serverSnapshot} error={syncError} />
+              <SyncBadge
+                status={syncStatus}
+                snapshot={serverSnapshot}
+                error={syncError}
+                configured={blobConfigured}
+              />
               <button
                 type="button"
                 onClick={() => {
@@ -311,6 +326,21 @@ export default function TheGrovePage() {
             <div className="rounded-lg border border-[color:var(--grove-red)]/40 bg-[color:var(--grove-red)]/10 px-4 py-3 flex items-center gap-2 text-sm text-[color:var(--grove-red)] grove-no-print">
               <AlertTriangle className="h-4 w-4" />
               {parseError}
+            </div>
+          )}
+
+          {blobConfigured === false && (
+            <div className="rounded-lg border border-[color:var(--grove-blue)]/30 bg-[color:var(--grove-blue)]/5 px-4 py-3 flex items-start gap-3 grove-no-print">
+              <CloudUpload className="h-5 w-5 text-[color:var(--grove-blue)] shrink-0 mt-0.5" />
+              <div className="flex-1 text-sm">
+                <div className="font-semibold text-[color:var(--grove-text)]">Sharing not set up yet</div>
+                <div className="text-[color:var(--grove-muted)] mt-0.5">
+                  Right now, uploaded files only live in your browser. To share a live link with coworkers,
+                  enable Vercel Blob in your Vercel project:{" "}
+                  <span className="text-[color:var(--grove-text)]">Dashboard → Storage → Create Database → Blob → Connect to this project</span>.
+                  After it&rsquo;s enabled, redeploy once and uploads will auto-persist.
+                </div>
+              </div>
             </div>
           )}
 
@@ -399,10 +429,12 @@ function SyncBadge({
   status,
   snapshot,
   error,
+  configured,
 }: {
   status: SyncStatus;
   snapshot: ServerSnapshot | null;
   error: string | null;
+  configured: boolean | null;
 }) {
   if (status === "loading") {
     return (
@@ -420,7 +452,9 @@ function SyncBadge({
       </span>
     );
   }
-  if (status === "error") {
+  // Only surface a "Sync failed" error if sharing is set up. When Blob isn't
+  // configured, the banner above explains the situation — no alarming chip.
+  if (status === "error" && configured !== false) {
     return (
       <span
         className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-red)]/40 bg-[color:var(--grove-red)]/10 text-[color:var(--grove-red)]"
@@ -442,6 +476,14 @@ function SyncBadge({
       <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-green)]/40 bg-[color:var(--grove-green)]/10 text-[color:var(--grove-green)]">
         <Check className="h-3.5 w-3.5" />
         Shared · {when}
+      </span>
+    );
+  }
+  if (configured === false) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-border)] text-[color:var(--grove-muted)]">
+        <CloudUpload className="h-3.5 w-3.5" />
+        Sharing not set up
       </span>
     );
   }
