@@ -10,9 +10,6 @@ import {
   AlertTriangle,
   X,
   FileSpreadsheet,
-  CloudUpload,
-  Check,
-  Share2,
 } from "lucide-react";
 import FileDropZone, { UploadedFiles } from "@/components/grove/FileDropZone";
 import ScoreCard from "@/components/grove/ScoreCard";
@@ -40,13 +37,6 @@ import {
 } from "@/lib/grove-baseline";
 import { GROVE_META } from "@/lib/grove-config";
 
-type SyncStatus = "idle" | "loading" | "uploading" | "saved" | "error";
-
-interface ServerSnapshot {
-  uploadedAt: string;
-  urls: { rentRoll: string; availability: string; residentBalances: string };
-}
-
 export default function TheGrovePage() {
   const [files, setFiles] = useState<UploadedFiles>({});
   const [rentRoll, setRentRoll] = useState<RentRollUnit[]>([]);
@@ -58,42 +48,11 @@ export default function TheGrovePage() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
-  // Server-sync state for cross-user sharing
-  const [serverSnapshot, setServerSnapshot] = useState<ServerSnapshot | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>("loading");
-  const [syncError, setSyncError] = useState<string | null>(null);
-
-  // Hydration: load baseline + history + most-recent server snapshot
+  // Hydration: load baseline + history
   useEffect(() => {
     setBaseline(loadBaseline());
     setHistory(loadHistory());
     setHydrated(true);
-
-    (async () => {
-      try {
-        const res = await fetch("/api/grove/snapshot", { cache: "no-store" });
-        if (!res.ok) throw new Error(`Server returned ${res.status}`);
-        const data = (await res.json()) as { snapshot: ServerSnapshot | null };
-        if (data.snapshot) {
-          setServerSnapshot(data.snapshot);
-          // Download the 3 files in parallel, turn into buffers, populate `files`.
-          const [rr, av, rb] = await Promise.all([
-            fetch(data.snapshot.urls.rentRoll).then((r) => r.arrayBuffer()),
-            fetch(data.snapshot.urls.availability).then((r) => r.arrayBuffer()),
-            fetch(data.snapshot.urls.residentBalances).then((r) => r.arrayBuffer()),
-          ]);
-          setFiles({
-            rentRoll: { name: "Rent Roll.xls", buffer: rr },
-            availability: { name: "Availability.xls", buffer: av },
-            residentBalances: { name: "Resident Balances.xls", buffer: rb },
-          });
-        }
-        setSyncStatus("idle");
-      } catch (err) {
-        setSyncStatus("idle");
-        setSyncError(err instanceof Error ? err.message : "Failed to load shared snapshot");
-      }
-    })();
   }, []);
 
   // Parse files on upload
@@ -107,47 +66,6 @@ export default function TheGrovePage() {
       setParseError(err instanceof Error ? err.message : "Failed to parse files");
     }
   }, [files]);
-
-  // When the user has uploaded a fresh set of 3 files locally, push them to the server
-  // so collaborators see the same data. We only push when all 3 are present AND they
-  // differ from what the server currently has (i.e., this upload didn't come FROM the server).
-  const handleFilesReady = useCallback(
-    async (next: UploadedFiles) => {
-      setFiles(next);
-      const complete = next.rentRoll && next.availability && next.residentBalances;
-      if (!complete) return;
-
-      // Skip upload if these buffers came from the server snapshot (same sizes).
-      if (
-        serverSnapshot &&
-        next.rentRoll &&
-        next.availability &&
-        next.residentBalances &&
-        next.rentRoll.name.startsWith("Rent Roll") &&
-        files.rentRoll?.buffer === next.rentRoll.buffer
-      ) {
-        return;
-      }
-
-      setSyncStatus("uploading");
-      setSyncError(null);
-      try {
-        const fd = new FormData();
-        fd.append("rentRoll", new Blob([next.rentRoll!.buffer]), next.rentRoll!.name);
-        fd.append("availability", new Blob([next.availability!.buffer]), next.availability!.name);
-        fd.append("residentBalances", new Blob([next.residentBalances!.buffer]), next.residentBalances!.name);
-        const res = await fetch("/api/grove/snapshot", { method: "POST", body: fd });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error || `Upload failed (${res.status})`);
-        setServerSnapshot(body);
-        setSyncStatus("saved");
-      } catch (err) {
-        setSyncStatus("error");
-        setSyncError(err instanceof Error ? err.message : "Upload failed");
-      }
-    },
-    [serverSnapshot, files.rentRoll]
-  );
 
   const metrics = useMemo<GroveMetrics>(() => {
     if (rentRoll.length === 0 && availability.length === 0 && balances.length === 0) {
@@ -267,18 +185,6 @@ export default function TheGrovePage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <SyncBadge status={syncStatus} snapshot={serverSnapshot} error={syncError} />
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(window.location.href);
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-border)] hover:bg-[color:var(--grove-card-hover)]"
-                title="Copy shareable link"
-              >
-                <Share2 className="h-3.5 w-3.5" />
-                Share
-              </button>
               <button
                 type="button"
                 onClick={() => window.print()}
@@ -304,7 +210,7 @@ export default function TheGrovePage() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 grove-stagger">
           {/* File dropzone */}
           <div className="grove-no-print">
-            <FileDropZone onFilesReady={handleFilesReady} uploaded={files} />
+            <FileDropZone onFilesReady={setFiles} uploaded={files} />
           </div>
 
           {parseError && (
@@ -393,59 +299,6 @@ export default function TheGrovePage() {
       </div>
     </div>
   );
-}
-
-function SyncBadge({
-  status,
-  snapshot,
-  error,
-}: {
-  status: SyncStatus;
-  snapshot: ServerSnapshot | null;
-  error: string | null;
-}) {
-  if (status === "loading") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-border)] text-[color:var(--grove-muted)]">
-        <CloudUpload className="h-3.5 w-3.5 animate-pulse" />
-        Loading shared data…
-      </span>
-    );
-  }
-  if (status === "uploading") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-blue)]/40 bg-[color:var(--grove-blue)]/10 text-[color:var(--grove-blue)]">
-        <CloudUpload className="h-3.5 w-3.5 animate-pulse" />
-        Saving to shared link…
-      </span>
-    );
-  }
-  if (status === "error") {
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-red)]/40 bg-[color:var(--grove-red)]/10 text-[color:var(--grove-red)]"
-        title={error ?? ""}
-      >
-        <AlertTriangle className="h-3.5 w-3.5" />
-        Sync failed
-      </span>
-    );
-  }
-  if (snapshot) {
-    const when = new Date(snapshot.uploadedAt).toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-green)]/40 bg-[color:var(--grove-green)]/10 text-[color:var(--grove-green)]">
-        <Check className="h-3.5 w-3.5" />
-        Shared · {when}
-      </span>
-    );
-  }
-  return null;
 }
 
 function EmptyState() {
