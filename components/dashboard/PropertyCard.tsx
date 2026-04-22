@@ -95,7 +95,12 @@ export default function PropertyCard({ property: p }: Props) {
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${occBg}`}>
               {formatPct(p.occupancyPct)}
             </span>
-            {p.occupancyBudget != null && (
+            {p.economicOccupancyPct != null && p.economicOccupancyPct > 0 && (
+              <p className="text-xs mt-1 text-gray-500" title="Economic occupancy: rent charged ÷ market rent">
+                Econ {formatPct(p.economicOccupancyPct)}
+              </p>
+            )}
+            {p.economicOccupancyPct == null && p.occupancyBudget != null && (
               <p className={`text-xs mt-1 flex items-center justify-center gap-0.5 ${p.occupancyPct >= p.occupancyBudget ? "text-green-600" : "text-amber-600"}`}>
                 {p.occupancyPct >= p.occupancyBudget ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                 vs {formatPct(p.occupancyBudget)}
@@ -123,6 +128,29 @@ export default function PropertyCard({ property: p }: Props) {
           </div>
 
         </div>
+
+        {((p.ntvUnits ?? 0) > 0 || (p.preleasedUnits ?? 0) > 0 || (p.leasesExpiring30 ?? 0) > 0) && (
+          <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+            <span className="font-medium text-gray-500">Pipeline</span>
+            <div className="flex items-center gap-2">
+              {(p.preleasedUnits ?? 0) > 0 && (
+                <span className="text-green-700" title="Signed leases not yet moved in">
+                  +{p.preleasedUnits} pre
+                </span>
+              )}
+              {(p.ntvUnits ?? 0) > 0 && (
+                <span className="text-amber-700" title="Notice to vacate">
+                  −{p.ntvUnits} NTV
+                </span>
+              )}
+              {(p.leasesExpiring30 ?? 0) > 0 && (
+                <span className="text-gray-600" title="Leases expiring in next 30 days">
+                  {p.leasesExpiring30} exp 30d
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className={`mt-3 pt-3 border-t border-gray-100 flex items-center gap-1 text-xs ${stalenessColor(p.lastDataPulled)}`}>
           <Clock className="h-3 w-3 flex-shrink-0" />

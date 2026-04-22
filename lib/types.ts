@@ -24,6 +24,25 @@ export interface Property {
   occupancyBudget?: number;    // occupancy % budget target
   delinquencyBudget?: number;  // delinquency % of GPR budget target
   lastDataPulled?: string;     // ISO timestamp of most recent report received for this property
+
+  // Analyst-grade metrics (populated from snapshots + financials_monthly tabs)
+  economicOccupancyPct?: number;   // actual_rent / market_rent
+  projectedOccupancyPct?: number;  // (occupied - ntv + preleased) / total
+  expectedMTD?: number;            // expected month-end collections
+  lastNOI?: number;                // most recent monthly NOI
+  lastReportMonth?: string;        // "YYYY-MM" of latest financials row
+  leasesExpiring30?: number;
+  leasesExpiring60?: number;
+  leasesExpiring90?: number;
+  ntvUnits?: number;               // notice-to-vacate count
+  preleasedUnits?: number;         // signed leases not moved in
+  lossToLease?: number;            // market_rent - actual_rent (dollars)
+  mtomUnits?: number;              // month-to-month count
+  budgetVariancePct?: number;      // NOI variance vs budget
+  budgetVarianceAmt?: number;
+  pmFocus?: string;
+  activeProjects?: string;
+  currentSpecial?: string;
 }
 
 // ─── Column mapping (CSV import) ─────────────────────────────────────────────

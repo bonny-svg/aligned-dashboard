@@ -12,39 +12,65 @@ const AppStateContext = createContext<{
   sheetsLoading: boolean;
 } | null>(null);
 
+function num(v: string | undefined): number | null {
+  if (v == null || v === '') return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+
+/** Normalize 0-1 or 0-100 occupancy values to 0-100 display scale. */
+function toPct(v: number | null): number | null {
+  if (v == null) return null;
+  return v <= 1 ? v * 100 : v;
+}
+
 function mergeSheetData(state: AppState, sheets: SheetsSummary): AppState {
   const updatedProperties = state.properties.map(prop => {
-    const rr   = sheets.rentRoll[prop.id];
-    const del  = sheets.delinquency[prop.id];
-    const fin  = sheets.financials[prop.id];
-    const avl  = sheets.availability[prop.id];
-    const wo   = sheets.work_orders[prop.id];
-    if (!rr && !del && !fin && !avl && !wo) return prop;
+    const s = sheets.snapshot[prop.id];
+    const f = sheets.financials[prop.id];
+    if (!s && !f) return prop;
 
-    const occupancyPct = rr?.occupancy_pct
-      ? parseFloat(rr.occupancy_pct) <= 1
-        ? parseFloat(rr.occupancy_pct) * 100
-        : parseFloat(rr.occupancy_pct)
-      : prop.occupancyPct;
+    // Core KPIs — prefer snapshot (weekly/daily freshness), fall back to sample
+    const physicalOcc   = toPct(num(s?.physical_occupancy_pct));
+    const economicOcc   = toPct(num(s?.economic_occupancy_pct));
+    const projectedOcc  = toPct(num(s?.projected_occupancy_pct));
 
-    const collectedMTD = rr?.rent_collected
-      ? parseFloat(rr.rent_collected)
-      : prop.collectedMTD;
+    const occupancyPct = physicalOcc ?? prop.occupancyPct;
+    const collectedMTD = num(s?.collected_mtd) ?? prop.collectedMTD;
+    const expectedMTD  = num(s?.expected_mtd);
 
-    const totalDelinquent = del?.total_delinquent_amt ? parseFloat(del.total_delinquent_amt) : null;
-    const gpr = fin?.gross_potential_rent ? parseFloat(fin.gross_potential_rent) : null;
-    const delinquencyPct = totalDelinquent != null && gpr != null && gpr > 0
+    // Delinquency — prefer direct delinquent_total / GPR (monthly), else snapshot total
+    const totalDelinquent = num(s?.delinquent_total);
+    const gpr             = num(f?.gross_potential_rent);
+    const delinquencyPct  = totalDelinquent != null && gpr != null && gpr > 0
       ? (totalDelinquent / gpr) * 100
       : prop.delinquencyPct;
 
-    const noi = fin?.noi ? parseFloat(fin.noi) : undefined;
-    const reportMonth = fin?.report_month || rr?.report_month || undefined;
+    const noi         = num(f?.noi) ?? undefined;
+    const reportMonth = f?.report_month || undefined;
 
-    // Most recent received_date across any report tab — the "last time we heard anything"
-    const receivedTimes = [rr, del, fin, avl, wo]
-      .map(r => r?.received_date)
-      .filter((s): s is string => !!s)
-      .map(s => new Date(s).getTime())
+    // Renewal pipeline & operational signals
+    const leasesExpiring30  = num(s?.leases_expiring_30d) ?? 0;
+    const leasesExpiring60  = num(s?.leases_expiring_60d) ?? 0;
+    const leasesExpiring90  = num(s?.leases_expiring_90d) ?? 0;
+    const ntvUnits          = num(s?.ntv_units) ?? 0;
+    const preleasedUnits    = num(s?.preleased_units) ?? 0;
+    const lossToLease       = num(s?.loss_to_lease_amt) ?? 0;
+    const mtomUnits         = num(s?.mtom_units) ?? 0;
+
+    // Budget variance (financials)
+    const budgetVarPct      = num(f?.budget_variance_pct) ?? null;
+    const budgetVarAmt      = num(f?.budget_variance_amt) ?? null;
+
+    // Narrative
+    const pmFocus          = s?.pm_focus || '';
+    const activeProjects   = s?.active_projects || '';
+    const currentSpecial   = s?.current_special || '';
+
+    // Last time we heard anything
+    const receivedTimes = [s?.received_date, f?.received_date]
+      .filter((d): d is string => !!d)
+      .map(d => new Date(d).getTime())
       .filter(t => !isNaN(t));
     const lastDataPulled = receivedTimes.length
       ? new Date(Math.max(...receivedTimes)).toISOString()
@@ -55,9 +81,17 @@ function mergeSheetData(state: AppState, sheets: SheetsSummary): AppState {
       occupancyPct,
       collectedMTD,
       delinquencyPct,
+      ...(economicOcc !== null ? { economicOccupancyPct: economicOcc } : {}),
+      ...(projectedOcc !== null ? { projectedOccupancyPct: projectedOcc } : {}),
+      ...(expectedMTD !== null ? { expectedMTD } : {}),
       ...(noi !== undefined ? { lastNOI: noi } : {}),
       ...(reportMonth !== undefined ? { lastReportMonth: reportMonth } : {}),
       ...(lastDataPulled !== undefined ? { lastDataPulled } : {}),
+      leasesExpiring30, leasesExpiring60, leasesExpiring90,
+      ntvUnits, preleasedUnits, lossToLease, mtomUnits,
+      ...(budgetVarPct != null ? { budgetVariancePct: budgetVarPct } : {}),
+      ...(budgetVarAmt != null ? { budgetVarianceAmt: budgetVarAmt } : {}),
+      pmFocus, activeProjects, currentSpecial,
     };
   });
   return { ...state, properties: updatedProperties };
