@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { MapPin, Home, TrendingDown, TrendingUp } from "lucide-react";
+import { MapPin, Home, TrendingDown, TrendingUp, Clock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatPct, occupancyBg, statusColor, computePropertyFinancials } from "@/lib/utils";
+import { formatCurrency, formatPct, occupancyBg, statusColor, computePropertyFinancials, relativeTime, stalenessColor } from "@/lib/utils";
 import { useAppState } from "@/lib/store";
 import type { Platform, Property } from "@/lib/types";
 
@@ -122,6 +122,13 @@ export default function PropertyCard({ property: p }: Props) {
             )}
           </div>
 
+        </div>
+
+        <div className={`mt-3 pt-3 border-t border-gray-100 flex items-center gap-1 text-xs ${stalenessColor(p.lastDataPulled)}`}>
+          <Clock className="h-3 w-3 flex-shrink-0" />
+          <span>
+            {p.lastDataPulled ? `Updated ${relativeTime(p.lastDataPulled)}` : "No data pulled yet"}
+          </span>
         </div>
       </CardContent>
     </Card>

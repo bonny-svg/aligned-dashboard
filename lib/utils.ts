@@ -144,3 +144,29 @@ export function formatDate(iso: string): string {
     year: "numeric",
   });
 }
+
+// ─── Data freshness helpers ──────────────────────────────────────────────────
+
+/** "today" / "yesterday" / "5 days ago" / "3 weeks ago" / "2 months ago" */
+export function relativeTime(iso: string | undefined | null): string {
+  if (!iso) return "never";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return "unknown";
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return `${Math.floor(days / 7)} week${Math.floor(days / 7) === 1 ? "" : "s"} ago`;
+  if (days < 365) return `${Math.floor(days / 30)} month${Math.floor(days / 30) === 1 ? "" : "s"} ago`;
+  return `${Math.floor(days / 365)} year${Math.floor(days / 365) === 1 ? "" : "s"} ago`;
+}
+
+/** Tailwind text color by staleness. Green ≤7d, amber ≤30d, red beyond or unknown. */
+export function stalenessColor(iso: string | undefined | null): string {
+  if (!iso) return "text-red-600";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (isNaN(days)) return "text-red-600";
+  if (days <= 7)  return "text-gray-500";
+  if (days <= 30) return "text-amber-600";
+  return "text-red-600";
+}

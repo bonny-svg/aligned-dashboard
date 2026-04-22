@@ -23,6 +23,7 @@ export interface Property {
   noiBudget?: number;          // monthly NOI budget for KPI comparison
   occupancyBudget?: number;    // occupancy % budget target
   delinquencyBudget?: number;  // delinquency % of GPR budget target
+  lastDataPulled?: string;     // ISO timestamp of most recent report received for this property
 }
 
 // ─── Column mapping (CSV import) ─────────────────────────────────────────────

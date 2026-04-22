@@ -14,10 +14,12 @@ const AppStateContext = createContext<{
 
 function mergeSheetData(state: AppState, sheets: SheetsSummary): AppState {
   const updatedProperties = state.properties.map(prop => {
-    const rr  = sheets.rentRoll[prop.id];
-    const del = sheets.delinquency[prop.id];
-    const fin = sheets.financials[prop.id];
-    if (!rr && !del && !fin) return prop;
+    const rr   = sheets.rentRoll[prop.id];
+    const del  = sheets.delinquency[prop.id];
+    const fin  = sheets.financials[prop.id];
+    const avl  = sheets.availability[prop.id];
+    const wo   = sheets.work_orders[prop.id];
+    if (!rr && !del && !fin && !avl && !wo) return prop;
 
     const occupancyPct = rr?.occupancy_pct
       ? parseFloat(rr.occupancy_pct) <= 1
@@ -38,6 +40,16 @@ function mergeSheetData(state: AppState, sheets: SheetsSummary): AppState {
     const noi = fin?.noi ? parseFloat(fin.noi) : undefined;
     const reportMonth = fin?.report_month || rr?.report_month || undefined;
 
+    // Most recent received_date across any report tab — the "last time we heard anything"
+    const receivedTimes = [rr, del, fin, avl, wo]
+      .map(r => r?.received_date)
+      .filter((s): s is string => !!s)
+      .map(s => new Date(s).getTime())
+      .filter(t => !isNaN(t));
+    const lastDataPulled = receivedTimes.length
+      ? new Date(Math.max(...receivedTimes)).toISOString()
+      : undefined;
+
     return {
       ...prop,
       occupancyPct,
@@ -45,6 +57,7 @@ function mergeSheetData(state: AppState, sheets: SheetsSummary): AppState {
       delinquencyPct,
       ...(noi !== undefined ? { lastNOI: noi } : {}),
       ...(reportMonth !== undefined ? { lastReportMonth: reportMonth } : {}),
+      ...(lastDataPulled !== undefined ? { lastDataPulled } : {}),
     };
   });
   return { ...state, properties: updatedProperties };
