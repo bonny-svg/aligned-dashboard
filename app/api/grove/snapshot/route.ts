@@ -141,9 +141,9 @@ export async function GET() {
       return NextResponse.json({ snapshot: null, configured: true });
     }
 
-    // URLs from list() are always fresh (for private stores they're signed with
-    // a current expiration); returning these directly means the client always
-    // has a working URL when the page loads.
+    // Return proxy URLs that stream from our /api/grove/file/[name] route.
+    // Direct Vercel Blob URLs for private stores return 403 to browsers —
+    // the proxy handles auth server-side.
     const uploadedAt = [rr, av, rb]
       .map((b) => new Date(b.uploadedAt).getTime())
       .reduce((a, b) => Math.max(a, b), 0);
@@ -151,7 +151,11 @@ export async function GET() {
     return NextResponse.json({
       snapshot: {
         uploadedAt: new Date(uploadedAt).toISOString(),
-        urls: { rentRoll: rr.url, availability: av.url, residentBalances: rb.url },
+        urls: {
+          rentRoll:         "/api/grove/file/rentRoll",
+          availability:     "/api/grove/file/availability",
+          residentBalances: "/api/grove/file/residentBalances",
+        },
       },
       configured: true,
     });
