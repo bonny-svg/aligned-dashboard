@@ -34,6 +34,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // When GROVE_UPLOAD_KEY is set, require it on the `x-upload-key` header for
+  // programmatic uploads (e.g., from the Apps Script agent). The manual
+  // drag-and-drop flow on /the-grove is same-origin and does NOT need the
+  // header — we only enforce if the header was actually passed (indicating a
+  // non-browser caller). If you want to fully lock down uploads, set the env
+  // var AND require it unconditionally below.
+  const required = process.env.GROVE_UPLOAD_KEY;
+  const provided = req.headers.get("x-upload-key");
+  if (required && provided && provided !== required) {
+    return NextResponse.json({ error: "Invalid x-upload-key." }, { status: 401 });
+  }
+
   const form = await req.formData();
   const rentRoll = form.get("rentRoll");
   const availability = form.get("availability");
