@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAppState } from "@/lib/store";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,14 @@ export default function PropertyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { state } = useAppState();
+
+  // The Grove has its own bespoke dashboard with a different data pipeline —
+  // redirect instead of rendering the generic property template.
+  useEffect(() => {
+    if (id === "the-grove") router.replace("/the-grove");
+  }, [id, router]);
+
+  if (id === "the-grove") return null;
 
   const property = state.properties.find((p) => p.id === id);
 
