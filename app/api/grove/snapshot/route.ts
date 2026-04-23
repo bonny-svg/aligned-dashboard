@@ -8,10 +8,11 @@
 //        availability:     { filename, base64 },
 //        residentBalances: { filename, base64 }
 //      }
-//      — used by the Apps Script agent; base64 avoids the multipart parsing
-//      quirks we hit trying to build a form-data body from Apps Script.
+//      — used by the Apps Script agent; base64 avoids multipart parsing quirks.
 //
-// GET returns the URLs + upload timestamp for the most-recent snapshot.
+// Files are written with access:"public" if the store allows it; otherwise
+// "private" (the default for newer Vercel Blob stores). GET regenerates fresh
+// URLs via list() on every request so private-store signed URLs never stale.
 
 import { NextRequest, NextResponse } from "next/server";
 import { put, list, BlobNotFoundError } from "@vercel/blob";
@@ -20,28 +21,36 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const FILES = {
-  rentRoll: "grove/latest/rent-roll.xls",
-  availability: "grove/latest/availability.xls",
+  rentRoll:         "grove/latest/rent-roll.xls",
+  availability:     "grove/latest/availability.xls",
   residentBalances: "grove/latest/resident-balances.xls",
-  meta: "grove/latest/meta.json",
 } as const;
 
-interface Meta {
-  uploadedAt: string;
-  urls: {
-    rentRoll: string;
-    availability: string;
-    residentBalances: string;
-  };
-}
-
-interface JsonFile {
-  filename?: string;
-  base64: string;
-}
-
+interface JsonFile { filename?: string; base64: string }
 function isJsonFile(v: unknown): v is JsonFile {
   return !!v && typeof v === "object" && typeof (v as JsonFile).base64 === "string";
+}
+
+// Vercel Blob's `access` param must match the store's access mode.
+// Newer stores are private-only; older are public-only. Try public first;
+// if the store rejects it with the specific "private store" error, retry as
+// private. Avoids forcing a hard-coded value that only works on one store type.
+async function putAdaptive(path: string, body: Buffer | Blob, contentType: string) {
+  const base = {
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType,
+  };
+  try {
+    return await put(path, body, { ...base, access: "public" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/private store|private access/i.test(msg)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await put(path, body, { ...base, access: "private" as any });
+    }
+    throw err;
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -53,7 +62,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Optional auth for programmatic callers — only enforced if the header is
-  // provided, so the same-origin browser drag-drop keeps working unchanged.
+  // provided, so same-origin browser drag-drop keeps working unchanged.
   const required = process.env.GROVE_UPLOAD_KEY;
   const provided = req.headers.get("x-upload-key");
   if (required && provided && provided !== required) {
@@ -66,7 +75,6 @@ export async function POST(req: NextRequest) {
 
   try {
     const contentType = (req.headers.get("content-type") || "").toLowerCase();
-
     if (contentType.includes("application/json")) {
       const json = (await req.json()) as Record<string, unknown>;
       if (!isJsonFile(json.rentRoll) || !isJsonFile(json.availability) || !isJsonFile(json.residentBalances)) {
@@ -100,37 +108,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const common = {
-    access: "public" as const,
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: "application/vnd.ms-excel",
-  };
-
   try {
-    const [rrBlob, avBlob, rbBlob] = await Promise.all([
-      put(FILES.rentRoll, rentRollBody, common),
-      put(FILES.availability, availabilityBody, common),
-      put(FILES.residentBalances, residentBalancesBody, common),
+    const [rr, av, rb] = await Promise.all([
+      putAdaptive(FILES.rentRoll,         rentRollBody,         "application/vnd.ms-excel"),
+      putAdaptive(FILES.availability,     availabilityBody,     "application/vnd.ms-excel"),
+      putAdaptive(FILES.residentBalances, residentBalancesBody, "application/vnd.ms-excel"),
     ]);
-
-    const meta: Meta = {
+    return NextResponse.json({
       uploadedAt: new Date().toISOString(),
-      urls: {
-        rentRoll: rrBlob.url,
-        availability: avBlob.url,
-        residentBalances: rbBlob.url,
-      },
-    };
-
-    await put(FILES.meta, JSON.stringify(meta), {
-      access: "public",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: "application/json",
+      urls: { rentRoll: rr.url, availability: av.url, residentBalances: rb.url },
     });
-
-    return NextResponse.json(meta);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Blob write failed." },
@@ -146,16 +133,28 @@ export async function GET() {
 
   try {
     const { blobs } = await list({ prefix: "grove/latest/" });
-    const metaBlob = blobs.find((b) => b.pathname === FILES.meta);
-    if (!metaBlob) {
+    const rr = blobs.find((b) => b.pathname === FILES.rentRoll);
+    const av = blobs.find((b) => b.pathname === FILES.availability);
+    const rb = blobs.find((b) => b.pathname === FILES.residentBalances);
+
+    if (!rr || !av || !rb) {
       return NextResponse.json({ snapshot: null, configured: true });
     }
 
-    const metaRes = await fetch(metaBlob.url, { cache: "no-store" });
-    if (!metaRes.ok) return NextResponse.json({ snapshot: null, configured: true });
+    // URLs from list() are always fresh (for private stores they're signed with
+    // a current expiration); returning these directly means the client always
+    // has a working URL when the page loads.
+    const uploadedAt = [rr, av, rb]
+      .map((b) => new Date(b.uploadedAt).getTime())
+      .reduce((a, b) => Math.max(a, b), 0);
 
-    const meta = (await metaRes.json()) as Meta;
-    return NextResponse.json({ snapshot: meta, configured: true });
+    return NextResponse.json({
+      snapshot: {
+        uploadedAt: new Date(uploadedAt).toISOString(),
+        urls: { rentRoll: rr.url, availability: av.url, residentBalances: rb.url },
+      },
+      configured: true,
+    });
   } catch (err) {
     if (err instanceof BlobNotFoundError) {
       return NextResponse.json({ snapshot: null, configured: true });
