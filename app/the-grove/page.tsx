@@ -344,38 +344,32 @@ export default function TheGrovePage() {
             </div>
           )}
 
-          {!hasData ? (
-            <EmptyState />
-          ) : (
-            <>
-              {/* Data hygiene warning */}
-              {metrics.dataHygieneWarnings.length > 0 && (
-                <div className="rounded-lg border border-[color:var(--grove-yellow)]/30 bg-[color:var(--grove-yellow)]/10 px-4 py-3 flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-[color:var(--grove-yellow)] shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <div className="text-sm font-semibold text-[color:var(--grove-yellow)]">Data hygiene</div>
-                    <ul className="mt-1 space-y-0.5 text-xs text-[color:var(--grove-muted)]">
-                      {metrics.dataHygieneWarnings.map((w, i) => (
-                        <li key={i}>• {w}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-
-              <ScoreCard
-                metrics={metrics}
-                baseline={baseline?.metrics ?? null}
-                baselineSetOn={baseline?.setOn ?? null}
-                lastUpdated={metrics.asOf}
-              />
-
-              <LeasingSection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
-              <DelinquencySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
-              <RenovationsSection metrics={metrics} baseline={baseline?.metrics ?? null} />
-              <OccupancySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
-            </>
+          {/* Data hygiene warning */}
+          {metrics.dataHygieneWarnings.length > 0 && (
+            <div className="rounded-lg border border-[color:var(--grove-yellow)]/30 bg-[color:var(--grove-yellow)]/10 px-4 py-3 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-[color:var(--grove-yellow)] shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-[color:var(--grove-yellow)]">Data hygiene</div>
+                <ul className="mt-1 space-y-0.5 text-xs text-[color:var(--grove-muted)]">
+                  {metrics.dataHygieneWarnings.map((w, i) => (
+                    <li key={i}>• {w}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           )}
+
+          <ScoreCard
+            metrics={metrics}
+            baseline={baseline?.metrics ?? null}
+            baselineSetOn={baseline?.setOn ?? null}
+            lastUpdated={metrics.asOf}
+          />
+
+          <LeasingSection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
+          <DelinquencySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
+          <RenovationsSection metrics={metrics} baseline={baseline?.metrics ?? null} />
+          <OccupancySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
         </main>
 
         {/* Reset baseline modal */}
