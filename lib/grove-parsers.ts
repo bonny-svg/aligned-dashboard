@@ -116,12 +116,13 @@ function findHeaderRow(
 
 /** Look up the column index for any of the given header synonyms. */
 function col(map: Map<string, number>, ...synonyms: string[]): number {
+  const entries = Array.from(map.entries());
   for (const s of synonyms) {
     const key = s.toLowerCase().replace(/\s+/g, " ").trim();
     const hit = map.get(key);
     if (hit != null) return hit;
     // Also try prefix match (Excel headers sometimes have trailing annotations)
-    for (const [k, v] of map.entries()) {
+    for (const [k, v] of entries) {
       if (k.startsWith(key)) return v;
     }
   }
