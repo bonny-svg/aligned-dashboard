@@ -1,6 +1,7 @@
 // ─── /lib/grove-parsers.ts ─────────────────────────────────────────────────
-// Parsers for the three RealPage OneSite .xls exports.
-// All three are OLE2/CDFV2 — xlsx library handles them via { type: "buffer" }.
+// Parsers for the three OneSite exports that feed the Grove dashboard.
+// Column positions are header-driven so both legacy wide layouts and current
+// compact layouts parse cleanly.
 
 import * as XLSX from "xlsx";
 
@@ -18,7 +19,7 @@ export interface RentRollUnit {
   sqft: number;
   status: RentRollStatus;
   residentName: string;
-  moveInOut: string; // ISO date or empty
+  moveInOut: string;
   leaseStart: string;
   leaseEnd: string;
   marketRent: number;
@@ -35,7 +36,7 @@ export interface AvailabilityUnit {
   marketRent: number;
   currLastLeaseRent: number;
   moveOut: string;
-  daysVacant: number | null; // null when raw cell was "*"
+  daysVacant: number | null;
   daysVacantRaw: string;
   estVacancyCost: number;
   makeReady: string;
@@ -86,9 +87,48 @@ function loadFirstSheet(buffer: ArrayBuffer): unknown[][] {
   });
 }
 
+/** Find the first row that contains all of the `musts` strings (case-insensitive,
+ *  whitespace-collapsed) somewhere in its cells. Returns both the row index and a
+ *  map from normalized cell text → column index, so callers can look up columns
+ *  without hard-coded offsets. */
+function findHeaderRow(
+  rows: unknown[][],
+  musts: string[]
+): { index: number; map: Map<string, number> } | null {
+  const want = musts.map((s) => s.toLowerCase().replace(/\s+/g, " ").trim());
+  for (let i = 0; i < rows.length; i++) {
+    const cells = (rows[i] || []).map((c) =>
+      toStr(c).toLowerCase().replace(/\s+/g, " ").trim()
+    );
+    const hasAll = want.every((w) =>
+      cells.some((cell) => cell === w || cell.startsWith(w))
+    );
+    if (hasAll) {
+      const map = new Map<string, number>();
+      cells.forEach((c, idx) => {
+        if (c && !map.has(c)) map.set(c, idx);
+      });
+      return { index: i, map };
+    }
+  }
+  return null;
+}
+
+/** Look up the column index for any of the given header synonyms. */
+function col(map: Map<string, number>, ...synonyms: string[]): number {
+  for (const s of synonyms) {
+    const key = s.toLowerCase().replace(/\s+/g, " ").trim();
+    const hit = map.get(key);
+    if (hit != null) return hit;
+    // Also try prefix match (Excel headers sometimes have trailing annotations)
+    for (const [k, v] of map.entries()) {
+      if (k.startsWith(key)) return v;
+    }
+  }
+  return -1;
+}
+
 // ─── Rent Roll Detail ──────────────────────────────────────────────────────
-// Multi-row per unit. Unit header row has c0=Unit, c17=Status. Sub-journal
-// rows (RESIDENT/HVOUCH/HOUSING) follow and are ignored for headline metrics.
 const VALID_STATUSES = new Set<RentRollStatus>([
   "Occupied",
   "Vacant",
@@ -107,32 +147,51 @@ function normalizeStatus(raw: string): RentRollStatus {
 
 export function parseRentRoll(buffer: ArrayBuffer): RentRollUnit[] {
   const rows = loadFirstSheet(buffer);
+  // OneSite rent roll header row contains "Unit" + "Unit/Lease Status".
+  const hdr = findHeaderRow(rows, ["unit", "unit/lease status"])
+           || findHeaderRow(rows, ["unit", "status"]);
+  if (!hdr) return [];
+
+  const cUnit     = col(hdr.map, "unit");
+  const cFloor    = col(hdr.map, "floorplan", "floor plan");
+  const cSqft     = col(hdr.map, "sqft", "sq ft", "square feet");
+  const cStatus   = col(hdr.map, "unit/lease status", "status");
+  const cName     = col(hdr.map, "name", "resident name", "tenant");
+  const cMoveIn   = col(hdr.map, "move-in", "move in");
+  const cLStart   = col(hdr.map, "lease start", "lease from");
+  const cLEnd     = col(hdr.map, "lease end", "lease to");
+  const cMarket   = col(hdr.map, "market + addl.", "market + addl", "market rent", "market");
+  const cLRent    = col(hdr.map, "lease rent", "rent amount", "rent");
+  const cTotalBill= col(hdr.map, "total billing", "total");
+  const cBalance  = col(hdr.map, "balance", "past due");
+
   const units: RentRollUnit[] = [];
 
-  for (const raw of rows) {
-    const row = raw as unknown[];
-    const unit = toStr(row[0]);
-    const status = toStr(row[17]);
+  for (let r = hdr.index + 1; r < rows.length; r++) {
+    const row = rows[r] as unknown[];
+    const unit = toStr(row[cUnit]);
+    const statusRaw = toStr(row[cStatus]);
 
-    // Skip blank, totals, and header rows
-    if (!unit || unit === "Totals:" || status === "Unit/Lease Status") continue;
+    if (!unit || /^totals?:?$/i.test(unit)) continue;
+    // Skip any row where the unit field is a sub-journal marker rather than a unit number
+    if (/^(resident|hvouch|housing|reserve)$/i.test(unit)) continue;
 
-    const norm = normalizeStatus(status);
-    if (!VALID_STATUSES.has(norm)) continue; // skip sub-journal rows
+    const status = normalizeStatus(statusRaw);
+    if (!VALID_STATUSES.has(status)) continue;
 
     units.push({
       unit,
-      floorplan: toStr(row[2]),
-      sqft: toNum(row[13]),
-      status: norm,
-      residentName: toStr(row[19]),
-      moveInOut: toStr(row[23]),
-      leaseStart: toStr(row[27]),
-      leaseEnd: toStr(row[29]),
-      marketRent: toNum(row[32]),
-      leaseRent: toNum(row[42]),
-      totalBilling: toNum(row[50]),
-      balance: toNum(row[55]),
+      floorplan: cFloor     >= 0 ? toStr(row[cFloor])     : "",
+      sqft:      cSqft      >= 0 ? toNum(row[cSqft])      : 0,
+      status,
+      residentName: cName   >= 0 ? toStr(row[cName])      : "",
+      moveInOut:  cMoveIn   >= 0 ? toStr(row[cMoveIn])    : "",
+      leaseStart: cLStart   >= 0 ? toStr(row[cLStart])    : "",
+      leaseEnd:   cLEnd     >= 0 ? toStr(row[cLEnd])      : "",
+      marketRent: cMarket   >= 0 ? toNum(row[cMarket])    : 0,
+      leaseRent:  cLRent    >= 0 ? toNum(row[cLRent])     : 0,
+      totalBilling: cTotalBill >= 0 ? toNum(row[cTotalBill]) : 0,
+      balance:    cBalance  >= 0 ? toNum(row[cBalance])   : 0,
     });
   }
 
@@ -140,9 +199,6 @@ export function parseRentRoll(buffer: ArrayBuffer): RentRollUnit[] {
 }
 
 // ─── Availability ──────────────────────────────────────────────────────────
-// Section-based. Headers in c0 like "Vacant Not Leased Not Ready (N)".
-// Data rows: c2=Unit, etc. "BREAK" in c0 is still a valid data row.
-// "no amenities" filler rows — skip.
 const SECTION_HEADERS: {
   match: RegExp;
   section: AvailabilityUnit["section"];
@@ -154,51 +210,64 @@ const SECTION_HEADERS: {
 
 export function parseAvailability(buffer: ArrayBuffer): AvailabilityUnit[] {
   const rows = loadFirstSheet(buffer);
+  // The header row on availability reports has Bldg/Unit, Floor Plan, SQFT, etc.
+  // Headers often include newlines ("Bldg/\nUnit" → normalized "bldg/ unit").
+  const hdr = findHeaderRow(rows, ["sqft"]) ||
+              findHeaderRow(rows, ["market + addl.", "sqft"]);
+
+  // Column lookups (with fallbacks for when the header has line breaks)
+  const cUnit   = hdr ? col(hdr.map, "bldg/ unit", "bldg/unit", "unit")          : 2;
+  const cFloor  = hdr ? col(hdr.map, "floor plan", "floor/ plan", "floorplan")   : 8;
+  const cSqft   = hdr ? col(hdr.map, "sqft")                                     : 12;
+  const cMarket = hdr ? col(hdr.map, "market + addl.", "market + addl", "market rent") : 13;
+  const cLast   = hdr ? col(hdr.map, "curr/last lease rent", "curr/last", "last lease rent") : 16;
+  const cMOut   = hdr ? col(hdr.map, "move- out", "move-out", "move out")        : 19;
+  const cDays   = hdr ? col(hdr.map, "days vacant")                              : 21;
+  const cEstCost= hdr ? col(hdr.map, "estimated vacancy cost", "estimated vacancy", "estimated") : 23;
+  const cMR     = hdr ? col(hdr.map, "make ready", "make/ ready")                : 24;
+  const cSchedIn= hdr ? col(hdr.map, "scheduled move-in", "scheduled/ move-in")  : 32;
+  const cLSign  = hdr ? col(hdr.map, "lease signed", "lease/ signed")            : 41;
+  const cAppNm  = hdr ? col(hdr.map, "name", "applicant name")                   : 44;
+  const cCmts   = hdr ? col(hdr.map, "comments")                                 : 49;
+
   const units: AvailabilityUnit[] = [];
   let currentSection: AvailabilityUnit["section"] | null = null;
 
-  for (const raw of rows) {
-    const row = raw as unknown[];
+  // Availability has section markers ("Vacant Not Leased Not Ready (N)") in c0.
+  // We scan every row; headers are identified by position, not by leading col.
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] as unknown[];
     const c0 = toStr(row[0]);
-    const c2 = toStr(row[2]);
 
-    // Stop at the BREAKS excerpt section — those units are already counted in the
-    // main detail section above (they carry "BREAK" in c0 within the main section).
     if (/breaks?\s*-\s*excerpted/i.test(c0)) break;
 
-    // Section header detection
     const match = SECTION_HEADERS.find((s) => s.match.test(c0));
-    if (match) {
-      currentSection = match.section;
-      continue;
-    }
-
+    if (match) { currentSection = match.section; continue; }
     if (!currentSection) continue;
-    // BREAK rows still carry unit data from c2 onward
-    // Skip "no amenities" fillers
-    if (!c2 || /no\s+amenities/i.test(c0) || /no\s+amenities/i.test(c2)) continue;
-    // Skip header-ish rows
-    if (/^unit\b/i.test(c2)) continue;
 
-    const daysVacantRaw = toStr(row[21]);
-    const daysVacant = daysVacantRaw === "*" || daysVacantRaw === "" ? null : toNum(row[21]);
+    const unit = toStr(row[cUnit >= 0 ? cUnit : 2]);
+    if (!unit) continue;
+    if (/no\s+amenities/i.test(unit) || /^(unit|bldg)/i.test(unit)) continue;
+
+    const daysVacantRaw = toStr(row[cDays >= 0 ? cDays : 21]);
+    const daysVacant = daysVacantRaw === "*" || daysVacantRaw === "" ? null : toNum(row[cDays >= 0 ? cDays : 21]);
 
     units.push({
       section: currentSection,
-      unit: c2,
-      floorplan: toStr(row[8]),
-      sqft: toNum(row[12]),
-      marketRent: toNum(row[13]),
-      currLastLeaseRent: toNum(row[16]),
-      moveOut: toStr(row[19]),
+      unit,
+      floorplan: cFloor >= 0 ? toStr(row[cFloor]) : "",
+      sqft:      cSqft  >= 0 ? toNum(row[cSqft])  : 0,
+      marketRent: cMarket >= 0 ? toNum(row[cMarket]) : 0,
+      currLastLeaseRent: cLast >= 0 ? toNum(row[cLast]) : 0,
+      moveOut:   cMOut  >= 0 ? toStr(row[cMOut])  : "",
       daysVacant,
       daysVacantRaw,
-      estVacancyCost: toNum(row[23]),
-      makeReady: toStr(row[24]),
-      scheduledMoveIn: toStr(row[32]),
-      leaseSigned: toStr(row[41]),
-      applicantName: toStr(row[45]),
-      comments: toStr(row[49]),
+      estVacancyCost: cEstCost >= 0 ? toNum(row[cEstCost]) : 0,
+      makeReady: cMR    >= 0 ? toStr(row[cMR])    : "",
+      scheduledMoveIn: cSchedIn >= 0 ? toStr(row[cSchedIn]) : "",
+      leaseSigned: cLSign >= 0 ? toStr(row[cLSign]) : "",
+      applicantName: cAppNm >= 0 ? toStr(row[cAppNm]) : "",
+      comments: cCmts >= 0 ? toStr(row[cCmts]) : "",
     });
   }
 
@@ -206,59 +275,54 @@ export function parseAvailability(buffer: ArrayBuffer): AvailabilityUnit[] {
 }
 
 // ─── Resident Balances by Fiscal Period ────────────────────────────────────
-// Block-per-unit.
-// Unit header:   c1=Unit (3-4 digit), c3=ResidentName, c8=Status, c44=MoveOut/LeaseEnd
-// Sub-journal:   c3="       RESIDENT" / "       HVOUCH" / "       HOUSING" (indented)
-// Sub Totals:    c8="Sub Totals:" with aggregate values across sub-journals
-//                c17=BeginningDelinquent  c24=LeaseCharges   c28=TotalCredits
-//                c32=EndingDelinquent     c36=EndingBalance  c39=DepositsBalanceForward
-//                c41=EndingDepositBalance
+// The newer compact export is one row per resident with all balance columns on
+// the same row, rather than a block-per-unit layout with a "Sub Totals" row.
+// We detect by finding the header row, then iterate.
 export function parseResidentBalances(buffer: ArrayBuffer): ResidentBalance[] {
   const rows = loadFirstSheet(buffer);
+
+  const hdr = findHeaderRow(rows, ["bldg/unit", "resident name"]) ||
+              findHeaderRow(rows, ["unit", "resident name"]);
+  if (!hdr) return [];
+
+  const cUnit   = col(hdr.map, "bldg/unit", "unit");
+  const cName   = col(hdr.map, "resident name", "name");
+  const cStatus = col(hdr.map, "status");
+  const cBegDeq = col(hdr.map, "beginning delinquent balance", "beginning delinquent");
+  const cCharges= col(hdr.map, "total lease charges", "lease charges");
+  const cCredits= col(hdr.map, "total credits", "credits");
+  const cEndDeq = col(hdr.map, "ending delinquent balance", "ending delinquent");
+  const cEndBal = col(hdr.map, "ending balance");
+  const cDepFwd = col(hdr.map, "deposits balance forward", "deposits");
+  const cDepEnd = col(hdr.map, "ending deposit balance", "ending deposit");
+  const cMoveOut= col(hdr.map, "move-out", "move out", "lease end");
+
   const results: ResidentBalance[] = [];
 
-  let current: Partial<ResidentBalance> | null = null;
+  for (let r = hdr.index + 1; r < rows.length; r++) {
+    const row = rows[r] as unknown[];
+    const unit = toStr(row[cUnit]);
+    const name = cName >= 0 ? toStr(row[cName]) : "";
 
-  for (const raw of rows) {
-    const row = raw as unknown[];
-    const c1 = toStr(row[1]);
-    const c3 = toStr(row[3]);
-    const c8 = toStr(row[8]);
+    if (!unit || /^totals?:?$/i.test(unit)) continue;
+    // Skip rows that are sub-journal markers rather than units
+    if (!/^\d{3,5}$/.test(unit.replace(/\s+/g, ""))) continue;
+    // Skip rows with no resident name (shouldn't happen in compact format)
+    if (!name) continue;
 
-    // Sub Totals row (c8 === "Sub Totals:") closes the current unit block.
-    if (/^sub\s+totals?:/i.test(c8)) {
-      if (current && current.unit) {
-        results.push({
-          unit: current.unit,
-          residentName: current.residentName ?? "",
-          status: current.status ?? "",
-          moveOutOrLeaseEnd: current.moveOutOrLeaseEnd ?? "",
-          beginningDelinquent: toNum(row[17]),
-          leaseCharges: toNum(row[24]),
-          totalCredits: toNum(row[28]),
-          endingDelinquent: toNum(row[32]),
-          endingBalance: toNum(row[36]),
-          depositsBalanceForward: toNum(row[39]),
-          endingDepositBalance: toNum(row[41]),
-        });
-      }
-      current = null;
-      continue;
-    }
-
-    // Unit header: c1 is a 3-4 digit unit number and c3 is a resident name.
-    // Sub-journal rows have a whitespace-indented marker in c3 — reject those.
-    const isSubJournalMarker = /^(resident|hvouch|housing|reserve)\s*$/i.test(c3.trim());
-    if (isSubJournalMarker) continue;
-
-    if (/^\d{3,4}$/.test(c1) && c3) {
-      current = {
-        unit: c1,
-        residentName: c3,
-        status: c8,
-        moveOutOrLeaseEnd: toStr(row[44]),
-      };
-    }
+    results.push({
+      unit,
+      residentName: name,
+      status: cStatus >= 0 ? toStr(row[cStatus]) : "",
+      moveOutOrLeaseEnd: cMoveOut >= 0 ? toStr(row[cMoveOut]) : "",
+      beginningDelinquent: cBegDeq >= 0 ? toNum(row[cBegDeq]) : 0,
+      leaseCharges:        cCharges >= 0 ? toNum(row[cCharges]) : 0,
+      totalCredits:        cCredits >= 0 ? toNum(row[cCredits]) : 0,
+      endingDelinquent:    cEndDeq >= 0 ? toNum(row[cEndDeq]) : 0,
+      endingBalance:       cEndBal >= 0 ? toNum(row[cEndBal]) : 0,
+      depositsBalanceForward: cDepFwd >= 0 ? toNum(row[cDepFwd]) : 0,
+      endingDepositBalance:   cDepEnd >= 0 ? toNum(row[cDepEnd]) : 0,
+    });
   }
 
   return results;
@@ -269,8 +333,8 @@ export type GroveFileType = "rentRoll" | "availability" | "residentBalances" | "
 
 export function detectFileType(filename: string): GroveFileType {
   const f = filename.toLowerCase();
-  if (/resident[\s_-]?balance/i.test(filename) || /balances?/i.test(f)) return "residentBalances";
+  if (/resident[\s_+-]?balance/i.test(filename) || /balances?/i.test(f)) return "residentBalances";
   if (/avail/i.test(f)) return "availability";
-  if (/rent[\s_-]?roll/i.test(f)) return "rentRoll";
+  if (/rent[\s_+-]?roll/i.test(f)) return "rentRoll";
   return "unknown";
 }
