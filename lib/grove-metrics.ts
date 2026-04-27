@@ -70,6 +70,8 @@ export interface GroveMetrics {
 
   // Renovations
   rentReadyCount: number;
+  inProcessCount: number;
+  notStartedCount: number;
   vacantTotalCount: number;
   rentReadyRatio: number;
   avgDaysVacant: number;
@@ -80,6 +82,15 @@ export interface GroveMetrics {
   sayanUnitsTotal: number;
   sayanUnitsInProgress: number;
   longestVacant: { unit: string; days: number; cost: number }[];
+  preLeasedNotReady: {
+    unit: string;
+    floorplan: string;
+    scheduledMoveIn: string;
+    makeReady: string;
+    daysUntilMoveIn: number | null;
+    daysUntilReady: number | null;
+    overdue: boolean;
+  }[];
 
   // Floorplan
   floorplanStats: {
@@ -272,17 +283,49 @@ export function computeMetrics(
   const collectionRatePct = totalChargesMTD > 0 ? (collectedMTD / totalChargesMTD) * 100 : 0;
 
   // ─── Renovations ─────────────────────────────────────────────────────────
-  // Rent-ready = vacant-leased + vacants with make-ready date in past
+  // Ready TODAY = makeReady date is set and is today or in the past (across all sections).
+  // Vacant-Leased units are NOT automatically ready — they're in "NotReady" by definition.
   const vacantTotalCount = vacCount + vacLeasedCount;
-  const rentReadyCount =
-    vacLeasedCount +
-    availability.filter((u) => {
-      if (u.section !== "VacantNotLeasedNotReady") return false;
-      if (!u.makeReady) return false;
-      const days = daysBetween(u.makeReady);
-      return days != null && days <= 0;
-    }).length;
+  const rentReadyCount = availability.filter((u) => {
+    if (!u.makeReady) return false;
+    const days = daysBetween(u.makeReady);
+    return days != null && days <= 0;
+  }).length;
   const rentReadyRatio = vacantTotalCount > 0 ? (rentReadyCount / vacantTotalCount) * 100 : 0;
+
+  // In process = makeReady date set but still in the future
+  const inProcessCount = availability.filter((u) => {
+    if (!u.makeReady) return false;
+    const days = daysBetween(u.makeReady);
+    return days != null && days > 0;
+  }).length;
+
+  // Not started = no make-ready date at all
+  const notStartedCount = availability.filter((u) => !u.makeReady).length;
+
+  // Pre-leased but not ready = VacantLeasedNotReady units whose make-ready date
+  // is still in the future (or missing), meaning work isn't done before move-in.
+  const preLeasedNotReady = availability
+    .filter((u) => {
+      if (u.section !== "VacantLeasedNotReady") return false;
+      if (!u.makeReady) return true; // no date = not started
+      const days = daysBetween(u.makeReady);
+      return days != null && days > 0; // make-ready date still in future
+    })
+    .map((u) => {
+      const daysUntilMoveIn = u.scheduledMoveIn ? daysBetween(u.scheduledMoveIn) : null;
+      const daysUntilReady = u.makeReady ? daysBetween(u.makeReady) : null;
+      return {
+        unit: u.unit,
+        floorplan: u.floorplan,
+        scheduledMoveIn: u.scheduledMoveIn,
+        makeReady: u.makeReady,
+        daysUntilMoveIn,
+        daysUntilReady,
+        overdue: daysUntilReady != null && daysUntilMoveIn != null && daysUntilReady > daysUntilMoveIn,
+      };
+    })
+    .sort((a, b) => (a.daysUntilMoveIn ?? 999) - (b.daysUntilMoveIn ?? 999));
 
   const validDaysVacant = availability.map((u) => u.daysVacant).filter((d): d is number => d != null);
   const avgDaysVacant =
@@ -410,6 +453,8 @@ export function computeMetrics(
     totalChargesMTD,
     collectionRatePct,
     rentReadyCount,
+    inProcessCount,
+    notStartedCount,
     vacantTotalCount,
     rentReadyRatio,
     avgDaysVacant,
@@ -419,6 +464,7 @@ export function computeMetrics(
     daysVacantDistribution,
     sayanUnitsTotal,
     sayanUnitsInProgress,
+    preLeasedNotReady,
     longestVacant,
     floorplanStats,
     dataHygieneWarnings,
@@ -466,6 +512,8 @@ export function emptyMetrics(): GroveMetrics {
     totalChargesMTD: 0,
     collectionRatePct: 0,
     rentReadyCount: 0,
+    inProcessCount: 0,
+    notStartedCount: 0,
     vacantTotalCount: 0,
     rentReadyRatio: 0,
     avgDaysVacant: 0,
@@ -475,6 +523,7 @@ export function emptyMetrics(): GroveMetrics {
     daysVacantDistribution: [],
     sayanUnitsTotal: 0,
     sayanUnitsInProgress: 0,
+    preLeasedNotReady: [],
     longestVacant: [],
     floorplanStats: [],
     dataHygieneWarnings: [],
