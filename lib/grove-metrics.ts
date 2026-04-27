@@ -64,6 +64,9 @@ export interface GroveMetrics {
   evictionRiskCount: number;
   concentrationPct: number;
   payingDownCount: number;
+  collectedMTD: number;
+  totalChargesMTD: number;
+  collectionRatePct: number;
 
   // Renovations
   rentReadyCount: number;
@@ -264,6 +267,10 @@ export function computeMetrics(
     (b) => b.endingDelinquent < b.beginningDelinquent && b.beginningDelinquent > 0
   ).length;
 
+  const collectedMTD = balances.reduce((s, b) => s + b.totalCredits, 0);
+  const totalChargesMTD = balances.reduce((s, b) => s + b.leaseCharges, 0);
+  const collectionRatePct = totalChargesMTD > 0 ? (collectedMTD / totalChargesMTD) * 100 : 0;
+
   // ─── Renovations ─────────────────────────────────────────────────────────
   // Rent-ready = vacant-leased + vacants with make-ready date in past
   const vacantTotalCount = vacCount + vacLeasedCount;
@@ -399,6 +406,9 @@ export function computeMetrics(
     evictionRiskCount,
     concentrationPct,
     payingDownCount,
+    collectedMTD,
+    totalChargesMTD,
+    collectionRatePct,
     rentReadyCount,
     vacantTotalCount,
     rentReadyRatio,
@@ -452,6 +462,9 @@ export function emptyMetrics(): GroveMetrics {
     evictionRiskCount: 0,
     concentrationPct: 0,
     payingDownCount: 0,
+    collectedMTD: 0,
+    totalChargesMTD: 0,
+    collectionRatePct: 0,
     rentReadyCount: 0,
     vacantTotalCount: 0,
     rentReadyRatio: 0,

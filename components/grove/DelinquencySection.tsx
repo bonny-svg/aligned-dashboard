@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, DollarSign, UserX, Users, TrendingDown } from "lucide-react";
+import { AlertTriangle, DollarSign, UserX, TrendingDown, CheckCircle } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -311,11 +311,11 @@ export default function DelinquencySection({ metrics, baseline, history }: Props
           tone={metrics.evictionRiskCount > THRESHOLDS.evictionRisk.red ? "bad" : "warn"}
         />
         <ActionCard
-          icon={Users}
-          title="Concentration Risk"
-          value={`${metrics.concentrationPct.toFixed(0)}%`}
-          subtitle="% owed by top 5"
-          tone={metrics.concentrationPct > THRESHOLDS.topFiveConcentration.red ? "bad" : "warn"}
+          icon={CheckCircle}
+          title="Collected MTD"
+          value={fmtDollar(metrics.collectedMTD)}
+          subtitle={`${metrics.collectionRatePct.toFixed(0)}% of ${fmtDollar(metrics.totalChargesMTD)} charged`}
+          tone={metrics.collectionRatePct >= 90 ? "good" : metrics.collectionRatePct >= 75 ? "warn" : "bad"}
         />
         <ActionCard
           icon={TrendingDown}
