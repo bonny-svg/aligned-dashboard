@@ -659,22 +659,25 @@ export default function TowneEastPage() {
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">% of Completed</th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-100">
-                    {[
-                      { label: "Same day",   count: extras.maintenance.completedSameDay },
-                      { label: "1–2 days",   count: extras.maintenance.completed1to2Days },
-                      { label: "3–7 days",   count: extras.maintenance.completed3to7Days },
-                      { label: "Over 7 days", count: extras.maintenance.completedOver7Days, warn: true },
-                    ].map(({ label, count, warn }) => (
-                      <tr key={label} className="hover:bg-gray-50/60">
-                        <td className="px-4 py-2.5 text-sm text-gray-700">{label}</td>
-                        <td className="px-4 py-2.5 text-sm text-right font-medium text-gray-900">{count}</td>
-                        <td className={cn("px-4 py-2.5 text-sm text-right", warn && count > 0 ? "text-red-500 font-semibold" : "text-gray-500")}>
-                          {extras.maintenance.workOrdersCompleted > 0
-                            ? fmtPct((count / extras.maintenance.workOrdersCompleted) * 100)
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const maint = extras.maintenance!;
+                      return [
+                        { label: "Same day",   count: maint.completedSameDay },
+                        { label: "1–2 days",   count: maint.completed1to2Days },
+                        { label: "3–7 days",   count: maint.completed3to7Days },
+                        { label: "Over 7 days", count: maint.completedOver7Days, warn: true },
+                      ].map(({ label, count, warn }) => (
+                        <tr key={label} className="hover:bg-gray-50/60">
+                          <td className="px-4 py-2.5 text-sm text-gray-700">{label}</td>
+                          <td className="px-4 py-2.5 text-sm text-right font-medium text-gray-900">{count}</td>
+                          <td className={cn("px-4 py-2.5 text-sm text-right", warn && count > 0 ? "text-red-500 font-semibold" : "text-gray-500")}>
+                            {maint.workOrdersCompleted > 0
+                              ? fmtPct((count / maint.workOrdersCompleted) * 100)
+                              : "—"}
+                          </td>
+                        </tr>
+                      ));
+                    })()}
                   </tbody>
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200"><tr>
                     <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total Completed</td>
