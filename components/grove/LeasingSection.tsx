@@ -1,18 +1,6 @@
 "use client";
 
-import { Users, UserPlus, Activity, Calendar, LogIn, LogOut, Clock } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  FunnelChart,
-  Funnel,
-  LabelList,
-  ResponsiveContainer,
-  Cell,
-  XAxis,
-  YAxis,
-  Tooltip,
-} from "recharts";
+import { Users, UserPlus, Activity, FileSignature, LogIn, LogOut, Clock } from "lucide-react";
 import SectionPill from "./SectionPill";
 import HeroMetric from "./HeroMetric";
 import type { GroveMetrics } from "@/lib/grove-metrics";
@@ -42,12 +30,6 @@ function heatmapColor(count: number, max: number): string {
 export default function LeasingSection({ metrics, baseline, history }: Props) {
   const maxCount = Math.max(1, ...metrics.leaseExpirationByMonth.map((m) => m.count));
 
-  const funnelData = metrics.applicationFunnel.map((f, i) => ({
-    name: f.stage,
-    value: f.count,
-    fill: [COLORS.blue, COLORS.orange, COLORS.green, COLORS.green][i] ?? COLORS.blue,
-  }));
-
   return (
     <section className="space-y-5">
       <SectionPill title="Leasing Pipeline" icon={Users} tone="blue" />
@@ -76,95 +58,38 @@ export default function LeasingSection({ metrics, baseline, history }: Props) {
           size="lg"
         />
         <HeroMetric
-          icon={Calendar}
-          label="90-Day Pipeline"
-          value={`${metrics.pipeline90Day}`}
-          subLabel="Applied → Approved → Signed → Scheduled MI"
+          icon={FileSignature}
+          label="Signed Leases"
+          value={`${metrics.signedLeasesCount}`}
+          subLabel="Vacant-Leased units with signed lease"
           status="neutral"
-          delta={delta(metrics.pipeline90Day, baseline?.pipeline90Day ?? null)}
+          delta={delta(metrics.signedLeasesCount, baseline?.signedLeasesCount ?? null)}
           deltaFormat="number"
-          sparkValues={sparkSeries(history, (m) => m.pipeline90Day)}
+          sparkValues={sparkSeries(history, (m) => m.signedLeasesCount)}
           size="lg"
         />
       </div>
 
-      {/* Chart row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Heatmap */}
-        <div className="rounded-xl border border-[color:var(--grove-border)] bg-[color:var(--grove-card)] p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-[color:var(--grove-text)]">Lease Expiration Heatmap</h3>
-              <p className="text-xs text-[color:var(--grove-muted)] mt-0.5">
-                {metrics.expiring90DayCount} leases expire in next 90 days
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            {metrics.leaseExpirationByMonth.map((m) => (
-              <div
-                key={m.month}
-                className="aspect-square rounded-lg flex flex-col items-center justify-center p-3 border border-white/5"
-                style={{ backgroundColor: heatmapColor(m.count, maxCount) }}
-                title={`${m.month}: ${m.count} leases`}
-              >
-                <div className="text-3xl font-bold tabular-nums text-white drop-shadow">{m.count}</div>
-                <div className="text-[11px] uppercase tracking-wider text-white/90 mt-1">{m.month}</div>
-              </div>
-            ))}
-          </div>
+      {/* Heatmap — full width */}
+      <div className="rounded-xl border border-[color:var(--grove-border)] bg-[color:var(--grove-card)] p-6">
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-[color:var(--grove-text)]">Lease Expiration Heatmap</h3>
+          <p className="text-xs text-[color:var(--grove-muted)] mt-0.5">
+            {metrics.expiring90DayCount} leases expire in next 90 days
+          </p>
         </div>
-
-        {/* Funnel */}
-        <div className="rounded-xl border border-[color:var(--grove-border)] bg-[color:var(--grove-card)] p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-[color:var(--grove-text)]">Application Funnel</h3>
-              <p className="text-xs text-[color:var(--grove-muted)] mt-0.5">Conversion by stage</p>
+        <div className="grid grid-cols-6 gap-3">
+          {metrics.leaseExpirationByMonth.map((m) => (
+            <div
+              key={m.month}
+              className="aspect-square rounded-lg flex flex-col items-center justify-center p-3 border border-white/5"
+              style={{ backgroundColor: heatmapColor(m.count, maxCount) }}
+              title={`${m.month}: ${m.count} leases`}
+            >
+              <div className="text-3xl font-bold tabular-nums text-white drop-shadow">{m.count}</div>
+              <div className="text-[11px] uppercase tracking-wider text-white/90 mt-1">{m.month}</div>
             </div>
-          </div>
-          <div className="h-60">
-            {funnelData.some((d) => d.value > 0) ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <FunnelChart>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: COLORS.card,
-                      border: `1px solid ${COLORS.border}`,
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                    labelStyle={{ color: COLORS.textPrimary }}
-                  />
-                  <Funnel dataKey="value" data={funnelData} isAnimationActive>
-                    <LabelList position="right" fill={COLORS.textPrimary} stroke="none" dataKey="name" />
-                    <LabelList position="center" fill="#fff" stroke="none" dataKey="value" />
-                  </Funnel>
-                </FunnelChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-xs text-[color:var(--grove-muted)]">
-                No pipeline data yet
-              </div>
-            )}
-          </div>
-          {/* Conversion chips */}
-          <div className="grid grid-cols-3 gap-2 mt-3 text-[11px]">
-            {funnelData.slice(0, -1).map((f, i) => {
-              const next = funnelData[i + 1];
-              const conv = f.value > 0 ? (next.value / f.value) * 100 : 0;
-              return (
-                <div key={`${f.name}->${next.name}`} className="rounded-md border border-[color:var(--grove-border)] px-2 py-1.5 text-center">
-                  <div className="text-[color:var(--grove-muted)]">
-                    {f.name} → {next.name}
-                  </div>
-                  <div className="font-semibold tabular-nums text-[color:var(--grove-text)]">
-                    {conv.toFixed(0)}%
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          ))}
         </div>
       </div>
 
@@ -196,7 +121,7 @@ export default function LeasingSection({ metrics, baseline, history }: Props) {
         />
         <DetailCard
           icon={LogOut}
-          title="Move-Outs This Month"
+          title="Upcoming Move-Outs (NTV)"
           count={metrics.moveOutsThisMonth.length}
           tone="bad"
           items={metrics.moveOutsThisMonth.slice(0, 8).map((u) => ({
@@ -204,7 +129,7 @@ export default function LeasingSection({ metrics, baseline, history }: Props) {
             middle: u.residentName,
             right: u.moveOutDate,
           }))}
-          empty="No move-outs this month"
+          empty="No upcoming NTV move-outs"
         />
       </div>
     </section>

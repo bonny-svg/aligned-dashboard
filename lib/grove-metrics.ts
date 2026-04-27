@@ -196,13 +196,11 @@ export function computeMetrics(
     })
     .map((u) => ({ unit: u.unit, residentName: u.residentName, leaseStart: u.leaseStart }));
 
-  const moveOutsThisMonth = rentRoll
-    .filter((u) => {
-      if (!u.moveInOut) return false;
-      const d = new Date(u.moveInOut);
-      return !isNaN(d.getTime()) && d.getMonth() === thisMonth && d.getFullYear() === thisYear;
-    })
-    .map((u) => ({ unit: u.unit, residentName: u.residentName, moveOutDate: u.moveInOut }));
+  // Use NTV units' lease-end date as the expected move-out date (moveInOut on occupied units
+  // is the original move-in date, not a future vacate date).
+  const moveOutsThisMonth = occupiedNTV
+    .map((u) => ({ unit: u.unit, residentName: u.residentName, moveOutDate: u.leaseEnd }))
+    .sort((a, b) => new Date(a.moveOutDate).getTime() - new Date(b.moveOutDate).getTime());
 
   // ─── Delinquency ─────────────────────────────────────────────────────────
   const delinquents = balances.filter((b) => b.endingDelinquent > 0);
