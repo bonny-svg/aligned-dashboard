@@ -13,6 +13,10 @@ const links = [
 export default function Navbar() {
   const pathname = usePathname();
 
+  // Property-specific pages have their own headers — hide the global nav on them.
+  if (pathname === "/the-grove" || pathname.startsWith("/the-grove/")) return null;
+  if (pathname === "/towne-east" || pathname.startsWith("/towne-east/")) return null;
+
   return (
     <nav className="bg-gray-900 text-white shadow-lg">
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">

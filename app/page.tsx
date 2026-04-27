@@ -5,6 +5,7 @@ import { useAppState } from "@/lib/store";
 import KPIBar from "@/components/dashboard/KPIBar";
 import PropertyCard from "@/components/dashboard/PropertyCard";
 import AddPropertyModal from "@/components/dashboard/AddPropertyModal";
+import LivePortfolioSection from "@/components/dashboard/LivePortfolioSection";
 import Link from "next/link";
 import { UploadCloud, Plus } from "lucide-react";
 
@@ -44,6 +45,9 @@ export default function DashboardPage() {
 
       {/* KPI bar */}
       <KPIBar />
+
+      {/* Live property metrics */}
+      <LivePortfolioSection />
 
       {/* Property grid */}
       <div>

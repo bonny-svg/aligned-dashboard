@@ -1,12 +1,64 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
-import { MapPin, Home, Clock, CheckCircle2, AlertCircle, Circle } from "lucide-react";
+import React, { useState, useCallback, useEffect } from "react";
+import { MapPin, Home, Clock, RefreshCw, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import RenovationSection from "@/components/RenovationSection";
 import CapExSection from "@/components/CapExSection";
+import type { TowneEastMetrics } from "@/lib/towne-east-metrics";
+
+// ─── EXTRAS TYPES (from supplemental platform reports) ───────────────────────
+interface DelinquencyExtras {
+  currentMonthCharges: number;
+  currentMonthDelinquency: number;
+  collectedOnAllOpenCharges: number;
+  delinquencyAllOpenCharges: number;
+  aiMessagesSent: number;
+  emailMessagesCount: number;
+  smsMessagesCount: number;
+  hoursSaved: number;
+  emailEngagementRate: number;
+  smsEngagementRate: number;
+  openTasksCount: number;
+  openTasksAmount: number;
+  oldestTaskDays: number;
+  unresponsiveCount: number;
+  unresponsiveAmount: number;
+  promiseToPayCount: number;
+  promiseToPayAmount: number;
+}
+interface MaintenanceExtras {
+  totalWorkOrdersOpened: number;
+  aiWorkOrdersOpened: number;
+  outstandingWorkOrders: number;
+  workOrdersCompleted: number;
+  completionRatePct: number;
+  completedWithin2DaysPct: number;
+  medianTimeToCompleteDays: number;
+  completedSameDay: number;
+  completed1to2Days: number;
+  completed3to7Days: number;
+  completedOver7Days: number;
+  aiSubmissionPct: number;
+}
+interface LeasingExtras {
+  leads: number;
+  toursBooked: number;
+  toursAttended: number;
+  applicationsStarted: number;
+  leasesSigned: number;
+  aiMessages: number;
+  hoursSaved: number;
+  leadToSignedRate: number;
+  tourToLeaseRate: number;
+}
+interface TowneEastExtras {
+  delinquency?: DelinquencyExtras;
+  maintenance?: MaintenanceExtras;
+  leasing?: LeasingExtras;
+}
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 type Month = "mar";
@@ -25,12 +77,10 @@ function fmt(n: number): string {
   const sign = n < 0 ? "-" : "";
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
   if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(n);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 }
+
+function fmtPct(n: number) { return `${n.toFixed(1)}%`; }
 
 function varStr(v: number): string {
   if (Math.abs(v) < 0.5) return "—";
@@ -50,29 +100,29 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
   );
 }
 
-// ─── REAL FINANCIAL DATA — March 2026 (partial month, acquired 3/16/2026) ─────
+// ─── HARDCODED FINANCIALS — March 2026 (partial month, acquired 3/16/2026) ───
 const INCOME: Record<Month, FinRow[]> = {
   mar: [
-    { label: "Gross Potential Rent",        actual:  46_076, budget: 109_000 },
-    { label: "Loss / Gain to Leases",       actual:       0, budget:  -4_850 },
-    { label: "Vacancy Loss",                actual:       0, budget:  -5_450 },
-    { label: "Write-Offs / Bad Debt",       actual:       0, budget:  -1_562 },
-    { label: "Other Revenue",               actual:       0, budget:   7_600 },
+    { label: "Gross Potential Rent",  actual:  46_076, budget: 109_000 },
+    { label: "Loss / Gain to Leases", actual:       0, budget:  -4_850 },
+    { label: "Vacancy Loss",          actual:       0, budget:  -5_450 },
+    { label: "Write-Offs / Bad Debt", actual:       0, budget:  -1_562 },
+    { label: "Other Revenue",         actual:       0, budget:   7_600 },
   ],
 };
 
 const EXPENSES: Record<Month, FinRow[]> = {
   mar: [
-    { label: "Personnel",                   actual:       0, budget: 12_514 },
-    { label: "Management Fees",             actual:       0, budget:  3_142 },
-    { label: "Administrative",              actual:       0, budget:  2_284 },
-    { label: "Leasing",                     actual:      22, budget:  2_346 },
-    { label: "Utilities",                   actual:      10, budget:  2_309 },
-    { label: "Services",                    actual:       0, budget:     42 },
-    { label: "Cleaning & Decorating",       actual:       0, budget:    975 },
-    { label: "Repairs & Maintenance",       actual:       0, budget:  2_115 },
-    { label: "Property Taxes",              actual:   3_190, budget:  7_833 },
-    { label: "Property Insurance",          actual:   4_010, budget:  4_867 },
+    { label: "Personnel",             actual:       0, budget: 12_514 },
+    { label: "Management Fees",       actual:       0, budget:  3_142 },
+    { label: "Administrative",        actual:       0, budget:  2_284 },
+    { label: "Leasing",               actual:      22, budget:  2_346 },
+    { label: "Utilities",             actual:      10, budget:  2_309 },
+    { label: "Services",              actual:       0, budget:     42 },
+    { label: "Cleaning & Decorating", actual:       0, budget:    975 },
+    { label: "Repairs & Maintenance", actual:       0, budget:  2_115 },
+    { label: "Property Taxes",        actual:   3_190, budget:  7_833 },
+    { label: "Property Insurance",    actual:   4_010, budget:  4_867 },
   ],
 };
 
@@ -83,39 +133,38 @@ const BELOW_LINE: Record<Month, FinRow[]> = {
   ],
 };
 
-// ─── DAILY SNAPSHOT DATA (from RealPage reports, updated Apr 12, 2026) ────────
-const SNAPSHOT = {
-  asOf: "Apr 12, 2026",
-  occupancy: { occupied: 91, total: 100, pct: 91.0 },
-  collections: {
-    totalCharged: 112_486,
-    totalCollected: 97_715,
-    endingBalance: 34_903,
-  },
-  delinquency: {
-    currentRent: 16_771,
-    lateFees: 10_595,
-    priorPeriod: 5_764,
-    badDebt: 1_853,
-    total: 35_021,
-  },
-};
-
-// ─── LEASE EXPIRATION / RENEWAL DATA (from OneSite, as of Apr 11, 2026) ──────
-const LEASING = [
-  { month: "Mar 2026", expiring: 13, renewed: 7, vacating: 2, mtm: 6, unknown: 0 },
-  { month: "Apr 2026", expiring:  3, renewed: 0, vacating: 1, mtm: 0, unknown: 2 },
-  { month: "May 2026", expiring:  8, renewed: 0, vacating: 0, mtm: 0, unknown: 8 },
-  { month: "Jun 2026", expiring:  6, renewed: 0, vacating: 0, mtm: 0, unknown: 6 },
-];
-
-// ─── OCCUPANCY DATA (for monthly financials) ─────────────────────────────────
 const OCCUPANCY: Record<Month, { actual: number; budget: number }> = {
   mar: { actual: 96.0, budget: 95.0 },
 };
 
-// ─── SUB-COMPONENTS ───────────────────────────────────────────────────────────
+// ─── CACHE ───────────────────────────────────────────────────────────────────
+const CACHE_KEY    = "te-metrics-cache-v1";
+const CACHE_TS_KEY = "te-metrics-cache-ts-v1";
 
+function saveCache(uploadedAt: string, metrics: TowneEastMetrics) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(metrics));
+    localStorage.setItem(CACHE_TS_KEY, uploadedAt);
+  } catch {}
+}
+
+function loadCache(): { metrics: TowneEastMetrics; uploadedAt: string } | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    const ts  = localStorage.getItem(CACHE_TS_KEY);
+    if (!raw || !ts) return null;
+    return { metrics: JSON.parse(raw) as TowneEastMetrics, uploadedAt: ts };
+  } catch { return null; }
+}
+
+// ─── SERVER SNAPSHOT SHAPE ───────────────────────────────────────────────────
+interface ServerSnapshot {
+  uploadedAt: string;
+  metricsUrl: string | null;
+  urls: { rentRoll: string; availability: string; residentBalances: string };
+}
+
+// ─── SUB-COMPONENTS ───────────────────────────────────────────────────────────
 function FinRowComponent({ row, isExpense }: { row: FinRow; isExpense?: boolean }) {
   const variance = row.actual - row.budget;
   if (row.isSummary) {
@@ -159,9 +208,77 @@ function SummaryRow({ label, actual, budget }: { label: string; actual: number; 
   );
 }
 
+function StatCard({ label, value, sub, color = "text-gray-900" }: { label: string; value: string; sub?: string; color?: string }) {
+  return (
+    <Card className="border-gray-200">
+      <CardContent className="pt-4 pb-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+        <p className={cn("text-2xl font-bold mt-1", color)}>{value}</p>
+        {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TowneEastPage() {
   const [month] = useState<Month>("mar");
+  const [metrics, setMetrics]         = useState<TowneEastMetrics | null>(null);
+  const [extras, setExtras]           = useState<TowneEastExtras | null>(null);
+  const [syncStatus, setSyncStatus]   = useState<"loading" | "idle" | "error">("loading");
+  const [syncError, setSyncError]     = useState<string | null>(null);
+  const [asOf, setAsOf]               = useState<string | null>(null);
+
+  useEffect(() => {
+    const cached = loadCache();
+    if (cached) { setMetrics(cached.metrics); setAsOf(cached.uploadedAt); }
+
+    (async () => {
+      try {
+        const res  = await fetch("/api/towne-east/snapshot", { cache: "no-store" });
+        if (!res.ok) throw new Error(`Server ${res.status}`);
+        const data = await res.json() as { snapshot: ServerSnapshot | null; configured?: boolean };
+
+        if (!data.snapshot) { setSyncStatus("idle"); return; }
+
+        setAsOf(data.snapshot.uploadedAt);
+
+        if (cached && cached.uploadedAt === data.snapshot.uploadedAt) {
+          setSyncStatus("idle");
+          return;
+        }
+
+        let computed: TowneEastMetrics;
+        if (data.snapshot.metricsUrl) {
+          const mres  = await fetch(data.snapshot.metricsUrl);
+          const mjson = await mres.json() as { uploadedAt: string; metrics: TowneEastMetrics };
+          computed = mjson.metrics;
+        } else {
+          const { parseRentRoll, parseAvailability, parseResidentBalances } = await import("@/lib/grove-parsers");
+          const { computeTowneEastMetrics } = await import("@/lib/towne-east-metrics");
+          const [rr, av, rb] = await Promise.all([
+            fetch(data.snapshot.urls.rentRoll).then((r) => r.arrayBuffer()),
+            fetch(data.snapshot.urls.availability).then((r) => r.arrayBuffer()),
+            fetch(data.snapshot.urls.residentBalances).then((r) => r.arrayBuffer()),
+          ]);
+          computed = computeTowneEastMetrics(parseRentRoll(rr), parseAvailability(av), parseResidentBalances(rb));
+        }
+
+        setMetrics(computed);
+        saveCache(data.snapshot.uploadedAt, computed);
+        setSyncStatus("idle");
+      } catch (err) {
+        setSyncStatus("error");
+        setSyncError(err instanceof Error ? err.message : "Failed to load");
+      }
+    })();
+
+    // Fetch supplemental extras (delinquency platform, maintenance, leasing CRM) in parallel
+    fetch("/api/towne-east/extras", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { extras?: TowneEastExtras }) => { if (d.extras) setExtras(d.extras); })
+      .catch(() => {});
+  }, []);
 
   const scrollTo = useCallback((id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -187,6 +304,12 @@ export default function TowneEastPage() {
   const dscr         = debtServiceActual > 0 ? noi.actual / debtServiceActual : null;
   const expenseRatio = egi.actual > 0 ? (expensesSum.actual / egi.actual) * 100 : null;
 
+  const isLoading = syncStatus === "loading" && !metrics;
+
+  const asOfLabel = asOf
+    ? new Date(asOf).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
@@ -204,9 +327,20 @@ export default function TowneEastPage() {
                 <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Financials as of Mar 31, 2026</span>
               </div>
             </div>
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              {syncStatus === "loading" && (
+                <span className="flex items-center gap-1"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Syncing…</span>
+              )}
+              {syncStatus === "error" && (
+                <span className="flex items-center gap-1 text-amber-600"><AlertTriangle className="h-3.5 w-3.5" />{syncError}</span>
+              )}
+              {asOfLabel && syncStatus !== "loading" && (
+                <span className="text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Data as of {asOfLabel}</span>
+              )}
+            </div>
           </div>
           <nav className="flex gap-0 -mb-px overflow-x-auto">
-            {(["Snapshot", "Financials", "Leasing", "Renovations", "CapEx"] as const).map((label) => (
+            {(["Snapshot", "Financials", "Leasing", "Maintenance", "Renovations", "CapEx"] as const).map((label) => (
               <button key={label} onClick={() => scrollTo(label.toLowerCase())}
                 className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-blue-600 border-b-2 border-transparent hover:border-blue-500 whitespace-nowrap transition-colors">
                 {label}
@@ -222,63 +356,118 @@ export default function TowneEastPage() {
         <section id="snapshot" className="scroll-mt-28">
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-900">Property Snapshot</h2>
-            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Updated {SNAPSHOT.asOf}</span>
+            {asOfLabel && <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Updated {asOfLabel}</span>}
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <Card className="border-gray-200"><CardContent className="pt-4 pb-3">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Occupancy</p>
-              <p className={cn("text-2xl font-bold mt-1", SNAPSHOT.occupancy.pct >= 95 ? "text-emerald-600" : "text-amber-600")}>{SNAPSHOT.occupancy.pct}%</p>
-              <p className="text-xs text-gray-400 mt-1">{SNAPSHOT.occupancy.occupied} / {SNAPSHOT.occupancy.total} units</p>
-            </CardContent></Card>
-            <Card className="border-gray-200"><CardContent className="pt-4 pb-3">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Charged</p>
-              <p className="text-2xl font-bold mt-1 text-gray-900">{fmt(SNAPSHOT.collections.totalCharged)}</p>
-              <p className="text-xs text-gray-400 mt-1">April lease charges</p>
-            </CardContent></Card>
-            <Card className="border-gray-200"><CardContent className="pt-4 pb-3">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Collected</p>
-              <p className="text-2xl font-bold mt-1 text-emerald-600">{fmt(SNAPSHOT.collections.totalCollected)}</p>
-              <p className="text-xs text-gray-400 mt-1">{((SNAPSHOT.collections.totalCollected / SNAPSHOT.collections.totalCharged) * 100).toFixed(1)}% of charged</p>
-            </CardContent></Card>
-            <Card className="border-red-100 bg-red-50/30"><CardContent className="pt-4 pb-3">
-              <p className="text-xs font-semibold text-red-500 uppercase tracking-wide">Delinquent Balance</p>
-              <p className="text-2xl font-bold mt-1 text-red-600">{fmt(SNAPSHOT.collections.endingBalance)}</p>
-              <p className="text-xs text-red-400 mt-1">All outstanding balances</p>
-            </CardContent></Card>
-          </div>
+          {isLoading ? (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+              {[...Array(4)].map((_, i) => (
+                <Card key={i} className="border-gray-200"><CardContent className="pt-4 pb-3">
+                  <div className="h-3 w-20 bg-gray-200 rounded animate-pulse mb-2" />
+                  <div className="h-7 w-16 bg-gray-200 rounded animate-pulse" />
+                </CardContent></Card>
+              ))}
+            </div>
+          ) : metrics ? (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                <StatCard
+                  label="Occupancy"
+                  value={fmtPct(metrics.physicalOccupancyPct)}
+                  sub={`${metrics.occupiedCount + metrics.occupiedNTVCount} / 100 units`}
+                  color={metrics.physicalOccupancyPct >= 95 ? "text-emerald-600" : "text-amber-600"}
+                />
+                <StatCard
+                  label="Total Charged"
+                  value={fmt(metrics.totalCharged)}
+                  sub="Current month lease charges"
+                />
+                <StatCard
+                  label="Collected"
+                  value={fmt(metrics.totalCollected)}
+                  sub={`${fmtPct(metrics.collectionRatePct)} of charged`}
+                  color="text-emerald-600"
+                />
+                <Card className="border-red-100 bg-red-50/30">
+                  <CardContent className="pt-4 pb-3">
+                    <p className="text-xs font-semibold text-red-500 uppercase tracking-wide">Delinquent Balance</p>
+                    <p className="text-2xl font-bold mt-1 text-red-600">{fmt(metrics.delinquentBalance)}</p>
+                    <p className="text-xs text-red-400 mt-1">{metrics.delinquentCount} unit{metrics.delinquentCount !== 1 ? "s" : ""} past due</p>
+                  </CardContent>
+                </Card>
+              </div>
 
-          <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200"><tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">% of Total</th>
-              </tr></thead>
-              <tbody className="divide-y divide-gray-100">
-                {[
-                  { label: "Current Month Rent Past Due", amount: SNAPSHOT.delinquency.currentRent },
-                  { label: "Late Fees Outstanding",       amount: SNAPSHOT.delinquency.lateFees },
-                  { label: "Prior Period Balances",       amount: SNAPSHOT.delinquency.priorPeriod },
-                  { label: "Bad Debt Charges",            amount: SNAPSHOT.delinquency.badDebt },
-                ].map((row) => (
-                  <tr key={row.label} className="hover:bg-gray-50/60">
-                    <td className="px-4 py-2.5 text-sm text-gray-700">{row.label}</td>
-                    <td className="px-4 py-2.5 text-sm text-right font-medium text-red-600">{fmt(row.amount)}</td>
-                    <td className="px-4 py-2.5 text-sm text-right text-gray-500">{((row.amount / SNAPSHOT.delinquency.total) * 100).toFixed(1)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-gray-800"><tr>
-                <td className="px-4 py-2.5 text-sm font-bold text-white">Total Delinquent</td>
-                <td className="px-4 py-2.5 text-sm text-right font-bold text-red-400">{fmt(SNAPSHOT.delinquency.total)}</td>
-                <td className="px-4 py-2.5 text-sm text-right font-bold text-gray-300">100%</td>
-              </tr></tfoot>
-            </table>
-          </div></CardContent></Card>
+              <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200"><tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Delinquency Breakdown</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">% of Total</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {metrics.delinquentBalance > 0 && (() => {
+                      const rows = [
+                        { label: "Prior Period Balance (carried over)", amount: metrics.priorPeriodBalance },
+                        { label: "New Delinquency This Period",         amount: metrics.newDelinquencyThisPeriod },
+                      ].filter(r => r.amount > 0);
+                      return rows.map((row) => (
+                        <tr key={row.label} className="hover:bg-gray-50/60">
+                          <td className="px-4 py-2.5 text-sm text-gray-700">{row.label}</td>
+                          <td className="px-4 py-2.5 text-sm text-right font-medium text-red-600">{fmt(row.amount)}</td>
+                          <td className="px-4 py-2.5 text-sm text-right text-gray-500">
+                            {metrics.delinquentBalance > 0 ? `${((row.amount / metrics.delinquentBalance) * 100).toFixed(1)}%` : "—"}
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                  <tfoot className="bg-gray-800"><tr>
+                    <td className="px-4 py-2.5 text-sm font-bold text-white">Total Delinquent</td>
+                    <td className="px-4 py-2.5 text-sm text-right font-bold text-red-400">{fmt(metrics.delinquentBalance)}</td>
+                    <td className="px-4 py-2.5 text-sm text-right font-bold text-gray-300">100%</td>
+                  </tr></tfoot>
+                </table>
+              </div></CardContent></Card>
+
+              {metrics.topDelinquents.length > 0 && (
+                <Card className="border-gray-200 mt-4"><CardContent className="p-0"><div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200"><tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Resident</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Balance</th>
+                    </tr></thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {metrics.topDelinquents.map((d) => (
+                        <tr key={d.unit} className="hover:bg-gray-50/60">
+                          <td className="px-4 py-2 text-sm font-mono font-semibold text-gray-900">{d.unit}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{d.name}</td>
+                          <td className="px-4 py-2 text-sm text-right font-medium text-red-600">{fmt(d.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div></CardContent></Card>
+              )}
+
+              {/* AI Collections platform data */}
+              {extras?.delinquency && (
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <StatCard label="Open Tasks" value={String(extras.delinquency.openTasksCount)} sub={`${fmt(extras.delinquency.openTasksAmount)} at risk · oldest ${extras.delinquency.oldestTaskDays}d`} color={extras.delinquency.openTasksCount > 10 ? "text-amber-600" : "text-gray-900"} />
+                  <StatCard label="Unresponsive" value={String(extras.delinquency.unresponsiveCount)} sub={fmt(extras.delinquency.unresponsiveAmount)} color={extras.delinquency.unresponsiveCount > 0 ? "text-red-600" : "text-gray-900"} />
+                  <StatCard label="Promise to Pay" value={String(extras.delinquency.promiseToPayCount)} sub={fmt(extras.delinquency.promiseToPayAmount)} color="text-amber-600" />
+                  <StatCard label="AI Messages Sent" value={extras.delinquency.aiMessagesSent.toLocaleString()} sub={`${extras.delinquency.hoursSaved}h saved · SMS ${extras.delinquency.smsEngagementRate}% open`} color="text-blue-600" />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+              No data yet — forward the three OneSite reports to your email agent to populate this section.
+            </div>
+          )}
         </section>
 
-        {/* ══ SECTION 2 · FINANCIALS (Monthly) ══ */}
+        {/* ══ SECTION 2 · FINANCIALS (Monthly, hardcoded) ══ */}
         <section id="financials" className="scroll-mt-28">
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-900">Financials — Actuals vs. Budget</h2>
@@ -349,57 +538,160 @@ export default function TowneEastPage() {
         <section id="leasing" className="scroll-mt-28">
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-900">Lease Expirations & Renewals</h2>
-            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Updated {SNAPSHOT.asOf}</span>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {(() => {
-              const totalExpiring = LEASING.reduce((s, l) => s + l.expiring, 0);
-              const totalRenewed  = LEASING.reduce((s, l) => s + l.renewed, 0);
-              const totalVacating = LEASING.reduce((s, l) => s + l.vacating, 0);
-              const totalUnknown  = LEASING.reduce((s, l) => s + l.unknown, 0);
-              return [
-                { label: "Expiring (Mar–Jun)", value: `${totalExpiring} leases`, color: "text-gray-900" },
-                { label: "Renewed",            value: `${totalRenewed}`,         color: "text-emerald-600" },
-                { label: "Vacating / NTV",     value: `${totalVacating}`,        color: "text-red-600" },
-                { label: "Pending / Unknown",  value: `${totalUnknown + LEASING.reduce((s, l) => s + l.mtm, 0)}`, color: "text-amber-600" },
-              ];
-            })().map(({ label, value, color }) => (
-              <Card key={label} className="border-gray-200"><CardContent className="pt-4 pb-3">
-                <p className="text-xs font-medium text-gray-500">{label}</p>
-                <p className={cn("text-xl font-bold mt-0.5", color)}>{value}</p>
-              </CardContent></Card>
-            ))}
+            {asOfLabel && <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Updated {asOfLabel}</span>}
           </div>
 
-          <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200"><tr>
-                {["Month", "Expiring", "Renewed", "Vacating", "MTM", "Unknown"].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+          {isLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+              {[...Array(4)].map((_, i) => (
+                <Card key={i} className="border-gray-200"><CardContent className="pt-4 pb-3">
+                  <div className="h-3 w-20 bg-gray-200 rounded animate-pulse mb-2" />
+                  <div className="h-6 w-10 bg-gray-200 rounded animate-pulse" />
+                </CardContent></Card>
+              ))}
+            </div>
+          ) : metrics ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                <StatCard label="Expiring (90 days)"  value={`${metrics.expiring90d} leases`} />
+                <StatCard label="Signed MTD"          value={`${metrics.signedLeasesMTD}`}      color="text-emerald-600" />
+                <StatCard label="Vacating / NTV"      value={`${metrics.moveOutsNTVCount}`}      color="text-red-600" />
+                <StatCard label="Month-to-Month"      value={`${metrics.monthToMonthCount}`}     color="text-amber-600" />
+              </div>
+
+              <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200"><tr>
+                    {["Month", "Expiring", "NTV / Vacating", "Month-to-Month"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {metrics.leaseExpirationByMonth.map((row) => (
+                      <tr key={row.month} className="hover:bg-gray-50/60">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.month}</td>
+                        <td className="px-4 py-3 text-sm font-bold text-gray-900">{row.expiring}</td>
+                        <td className="px-4 py-3 text-sm">{row.ntv > 0 ? <span className="font-semibold text-red-600">{row.ntv}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-3 text-sm">{row.mtm > 0 ? <span className="font-semibold text-amber-600">{row.mtm}</span> : <span className="text-gray-300">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t-2 border-gray-200"><tr>
+                    <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total (6 mo)</td>
+                    <td className="px-4 py-2.5 font-bold text-gray-900">{metrics.leaseExpirationByMonth.reduce((s, r) => s + r.expiring, 0)}</td>
+                    <td className="px-4 py-2.5 font-bold text-red-600">{metrics.leaseExpirationByMonth.reduce((s, r) => s + r.ntv, 0)}</td>
+                    <td className="px-4 py-2.5 font-bold text-amber-600">{metrics.leaseExpirationByMonth.reduce((s, r) => s + r.mtm, 0)}</td>
+                  </tr></tfoot>
+                </table>
+              </div></CardContent></Card>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+              No leasing data yet — forward the OneSite reports to your email agent.
+            </div>
+          )}
+
+          {/* CRM leasing funnel */}
+          {extras?.leasing && (
+            <div className="mt-4">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Leasing Funnel (CRM)</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {[
+                  { label: "Leads",        value: extras.leasing.leads },
+                  { label: "Tours Booked", value: extras.leasing.toursBooked },
+                  { label: "Tours Attended", value: extras.leasing.toursAttended },
+                  { label: "Applications", value: extras.leasing.applicationsStarted },
+                  { label: "Leases Signed", value: extras.leasing.leasesSigned, color: "text-emerald-600" },
+                ].map(({ label, value, color }) => (
+                  <Card key={label} className="border-gray-200">
+                    <CardContent className="pt-4 pb-3">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+                      <p className={cn("text-2xl font-bold mt-1", color ?? "text-gray-900")}>{value}</p>
+                    </CardContent>
+                  </Card>
                 ))}
-              </tr></thead>
-              <tbody className="divide-y divide-gray-100">
-                {LEASING.map((row) => (
-                  <tr key={row.month} className="hover:bg-gray-50/60">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.month}</td>
-                    <td className="px-4 py-3 text-sm font-bold text-gray-900">{row.expiring}</td>
-                    <td className="px-4 py-3 text-sm">{row.renewed > 0 ? <span className="font-semibold text-emerald-600">{row.renewed}</span> : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-4 py-3 text-sm">{row.vacating > 0 ? <span className="font-semibold text-red-600">{row.vacating}</span> : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-4 py-3 text-sm">{row.mtm > 0 ? <span className="font-semibold text-amber-600">{row.mtm}</span> : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-4 py-3 text-sm">{row.unknown > 0 ? <span className="font-semibold text-amber-600">{row.unknown}</span> : <span className="text-gray-300">—</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-gray-50 border-t-2 border-gray-200"><tr>
-                <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total</td>
-                <td className="px-4 py-2.5 font-bold text-gray-900">{LEASING.reduce((s, l) => s + l.expiring, 0)}</td>
-                <td className="px-4 py-2.5 font-bold text-emerald-600">{LEASING.reduce((s, l) => s + l.renewed, 0)}</td>
-                <td className="px-4 py-2.5 font-bold text-red-600">{LEASING.reduce((s, l) => s + l.vacating, 0)}</td>
-                <td className="px-4 py-2.5 font-bold text-amber-600">{LEASING.reduce((s, l) => s + l.mtm, 0)}</td>
-                <td className="px-4 py-2.5 font-bold text-amber-600">{LEASING.reduce((s, l) => s + l.unknown, 0)}</td>
-              </tr></tfoot>
-            </table>
-          </div></CardContent></Card>
+              </div>
+              {extras.leasing.leads > 0 && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Lead→Signed: {extras.leasing.leadToSignedRate.toFixed(1)}% · AI Messages: {extras.leasing.aiMessages} · Hours Saved: {extras.leasing.hoursSaved}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ══ SECTION 3.5 · MAINTENANCE ══ */}
+        <section id="maintenance" className="scroll-mt-28">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-900">Maintenance</h2>
+            {asOfLabel && <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Updated {asOfLabel}</span>}
+          </div>
+          {extras?.maintenance ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <StatCard
+                  label="Opened This Period"
+                  value={String(extras.maintenance.totalWorkOrdersOpened)}
+                  sub={`${extras.maintenance.aiWorkOrdersOpened} via AI`}
+                />
+                <StatCard
+                  label="Outstanding"
+                  value={String(extras.maintenance.outstandingWorkOrders)}
+                  color={extras.maintenance.outstandingWorkOrders > 5 ? "text-amber-600" : "text-gray-900"}
+                />
+                <StatCard
+                  label="Completion Rate"
+                  value={fmtPct(extras.maintenance.completionRatePct)}
+                  sub={`Within 2 days: ${fmtPct(extras.maintenance.completedWithin2DaysPct)}`}
+                  color={extras.maintenance.completionRatePct >= 90 ? "text-emerald-600" : "text-amber-600"}
+                />
+                <StatCard
+                  label="Median Days to Close"
+                  value={extras.maintenance.medianTimeToCompleteDays.toFixed(1)}
+                  color={extras.maintenance.medianTimeToCompleteDays <= 3 ? "text-emerald-600" : "text-amber-600"}
+                />
+              </div>
+              <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200"><tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Time to Close</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Work Orders</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">% of Completed</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {(() => {
+                      const maint = extras.maintenance!;
+                      return [
+                        { label: "Same day",   count: maint.completedSameDay },
+                        { label: "1–2 days",   count: maint.completed1to2Days },
+                        { label: "3–7 days",   count: maint.completed3to7Days },
+                        { label: "Over 7 days", count: maint.completedOver7Days, warn: true },
+                      ].map(({ label, count, warn }) => (
+                        <tr key={label} className="hover:bg-gray-50/60">
+                          <td className="px-4 py-2.5 text-sm text-gray-700">{label}</td>
+                          <td className="px-4 py-2.5 text-sm text-right font-medium text-gray-900">{count}</td>
+                          <td className={cn("px-4 py-2.5 text-sm text-right", warn && count > 0 ? "text-red-500 font-semibold" : "text-gray-500")}>
+                            {maint.workOrdersCompleted > 0
+                              ? fmtPct((count / maint.workOrdersCompleted) * 100)
+                              : "—"}
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t-2 border-gray-200"><tr>
+                    <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total Completed</td>
+                    <td className="px-4 py-2.5 font-bold text-gray-900 text-right">{extras.maintenance.workOrdersCompleted}</td>
+                    <td className="px-4 py-2.5 font-bold text-gray-500 text-right">100%</td>
+                  </tr></tfoot>
+                </table>
+              </div></CardContent></Card>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+              No maintenance data yet — forward the maintenance summary export to your email agent.
+            </div>
+          )}
         </section>
 
         {/* ══ SECTION 4 · RENOVATIONS (Live from Google Sheets) ══ */}

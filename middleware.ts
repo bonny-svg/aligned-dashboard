@@ -21,6 +21,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // ── The Grove — publicly accessible (partner-facing, no auth required) ──────
+  if (pathname === "/the-grove" || pathname.startsWith("/the-grove/")) return NextResponse.next();
+  if (pathname.startsWith("/api/grove/")) return NextResponse.next();
+
+  // ── Towne East API — must be reachable by the email-agent uploader ───────
+  if (pathname.startsWith("/api/towne-east/")) return NextResponse.next();
+
   // ── Main dashboard routes ───────────────────────────────────────────────────
   if (!PASSWORD) return NextResponse.next();
   if (pathname === "/login") return NextResponse.next();
