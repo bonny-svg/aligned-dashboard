@@ -82,7 +82,7 @@ function OccGauge({
 }
 
 export default function OccupancySection({ metrics, baseline, history }: Props) {
-  const economicOcc = 100 - metrics.delinquencyPctGPR;
+  const economicOcc = metrics.economicOccupancyPct;
 
   // Floorplan data for chart
   const floorplanData = metrics.floorplanStats.map((f) => ({
