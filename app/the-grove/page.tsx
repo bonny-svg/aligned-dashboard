@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-// useCallback retained for handleResetBaseline
+import { useCallback, useEffect, useState } from "react";
 import {
   MapPin,
   Home,
@@ -19,15 +18,8 @@ import LeasingSection from "@/components/grove/LeasingSection";
 import DelinquencySection from "@/components/grove/DelinquencySection";
 import RenovationsSection from "@/components/grove/RenovationsSection";
 import OccupancySection from "@/components/grove/OccupancySection";
-import {
-  parseRentRoll,
-  parseAvailability,
-  parseResidentBalances,
-  type RentRollUnit,
-  type AvailabilityUnit,
-  type ResidentBalance,
-} from "@/lib/grove-parsers";
-import { computeMetrics, emptyMetrics, type GroveMetrics } from "@/lib/grove-metrics";
+import { parseRentRoll, parseAvailability, parseResidentBalances } from "@/lib/grove-parsers";
+import { computeMetrics, type GroveMetrics } from "@/lib/grove-metrics";
 import {
   loadBaseline,
   saveBaseline,
@@ -39,7 +31,28 @@ import {
 } from "@/lib/grove-baseline";
 import { GROVE_META } from "@/lib/grove-config";
 
-type SyncStatus = "idle" | "loading" | "uploading" | "saved" | "error";
+const METRICS_CACHE_KEY = "grove-metrics-cache-v1";
+const METRICS_CACHE_TS_KEY = "grove-metrics-cache-ts-v1";
+
+function saveMetricsCache(uploadedAt: string, metrics: GroveMetrics) {
+  try {
+    localStorage.setItem(METRICS_CACHE_KEY, JSON.stringify(metrics));
+    localStorage.setItem(METRICS_CACHE_TS_KEY, uploadedAt);
+  } catch {}
+}
+
+function loadMetricsCache(): { metrics: GroveMetrics; uploadedAt: string } | null {
+  try {
+    const raw = localStorage.getItem(METRICS_CACHE_KEY);
+    const ts = localStorage.getItem(METRICS_CACHE_TS_KEY);
+    if (!raw || !ts) return null;
+    return { metrics: JSON.parse(raw) as GroveMetrics, uploadedAt: ts };
+  } catch {
+    return null;
+  }
+}
+
+type SyncStatus = "idle" | "loading" | "saved" | "error";
 
 interface ServerSnapshot {
   uploadedAt: string;
@@ -47,94 +60,80 @@ interface ServerSnapshot {
 }
 
 export default function TheGrovePage() {
-  const [files, setFiles] = useState<{ rentRoll?: { name: string; buffer: ArrayBuffer }; availability?: { name: string; buffer: ArrayBuffer }; residentBalances?: { name: string; buffer: ArrayBuffer } }>({});
-  const [rentRoll, setRentRoll] = useState<RentRollUnit[]>([]);
-  const [availability, setAvailability] = useState<AvailabilityUnit[]>([]);
-  const [balances, setBalances] = useState<ResidentBalance[]>([]);
+  const [metrics, setMetrics] = useState<GroveMetrics | null>(null);
   const [baseline, setBaseline] = useState<BaselineRecord | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
   const [showResetModal, setShowResetModal] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
-  // Server-sync state for cross-user sharing
   const [serverSnapshot, setServerSnapshot] = useState<ServerSnapshot | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("loading");
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [blobConfigured, setBlobConfigured] = useState<boolean | null>(null);
 
-  // Hydration: load baseline + history + most-recent server snapshot
   useEffect(() => {
-    setBaseline(loadBaseline());
-    setHistory(loadHistory());
+    const bl = loadBaseline();
+    const hist = loadHistory();
+    setBaseline(bl);
+    setHistory(hist);
     setHydrated(true);
+
+    // Show cached metrics immediately if available — eliminates the zero flash.
+    const cached = loadMetricsCache();
+    if (cached) setMetrics(cached.metrics);
 
     (async () => {
       try {
         const res = await fetch("/api/grove/snapshot", { cache: "no-store" });
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
-        const data = (await res.json()) as {
-          snapshot: ServerSnapshot | null;
-          configured?: boolean;
-        };
-        setBlobConfigured(data.configured ?? true);
-        if (data.snapshot) {
-          setServerSnapshot(data.snapshot);
-          // Download the 3 files in parallel, turn into buffers, populate `files`.
-          const [rr, av, rb] = await Promise.all([
-            fetch(data.snapshot.urls.rentRoll).then((r) => r.arrayBuffer()),
-            fetch(data.snapshot.urls.availability).then((r) => r.arrayBuffer()),
-            fetch(data.snapshot.urls.residentBalances).then((r) => r.arrayBuffer()),
-          ]);
-          setFiles({
-            rentRoll: { name: "Rent Roll.xls", buffer: rr },
-            availability: { name: "Availability.xls", buffer: av },
-            residentBalances: { name: "Resident Balances.xls", buffer: rb },
-          });
+        const data = (await res.json()) as { snapshot: ServerSnapshot | null; configured?: boolean };
+
+        if (!data.snapshot) { setSyncStatus("idle"); return; }
+
+        setServerSnapshot(data.snapshot);
+
+        // If the cached version matches the server timestamp, skip the download.
+        if (cached && cached.uploadedAt === data.snapshot.uploadedAt) {
+          setSyncStatus("idle");
+          return;
         }
+
+        // Newer data — download all 3 files and recompute.
+        const [rr, av, rb] = await Promise.all([
+          fetch(data.snapshot.urls.rentRoll).then((r) => r.arrayBuffer()),
+          fetch(data.snapshot.urls.availability).then((r) => r.arrayBuffer()),
+          fetch(data.snapshot.urls.residentBalances).then((r) => r.arrayBuffer()),
+        ]);
+        const rentRoll = parseRentRoll(rr);
+        const availability = parseAvailability(av);
+        const balances = parseResidentBalances(rb);
+        const computed = computeMetrics(rentRoll, availability, balances);
+        setMetrics(computed);
+        saveMetricsCache(data.snapshot.uploadedAt, computed);
         setSyncStatus("idle");
       } catch (err) {
-        setSyncStatus("idle");
-        setBlobConfigured(false);
-        setSyncError(err instanceof Error ? err.message : "Failed to load shared snapshot");
+        setSyncStatus("error");
+        setSyncError(err instanceof Error ? err.message : "Failed to load data");
+        if (!cached) setSyncStatus("idle"); // let the empty state show rather than spin forever
       }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Parse files on upload
+  // Persist baseline + history whenever fresh computed metrics arrive
   useEffect(() => {
-    setParseError(null);
-    try {
-      if (files.rentRoll) setRentRoll(parseRentRoll(files.rentRoll.buffer));
-      if (files.availability) setAvailability(parseAvailability(files.availability.buffer));
-      if (files.residentBalances) setBalances(parseResidentBalances(files.residentBalances.buffer));
-    } catch (err) {
-      setParseError(err instanceof Error ? err.message : "Failed to parse files");
-    }
-  }, [files]);
-
-  const metrics = useMemo<GroveMetrics>(() => {
-    if (rentRoll.length === 0 && availability.length === 0 && balances.length === 0) {
-      return emptyMetrics();
-    }
-    return computeMetrics(rentRoll, availability, balances);
-  }, [rentRoll, availability, balances]);
-
-  // Persist baseline + history the first time real data arrives
-  useEffect(() => {
-    if (!hydrated) return;
-    if (metrics.unitCount === 0) return;
+    if (!hydrated || !metrics || metrics.unitCount === 0) return;
     if (!baseline) {
       const saved = saveBaseline(metrics);
       setBaseline(saved);
     }
     setHistory(pushHistory(metrics));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metrics.asOf]);
+  }, [metrics?.asOf]);
 
   const handleResetBaseline = useCallback(() => {
     clearBaseline();
-    if (metrics.unitCount > 0) {
+    if (metrics && metrics.unitCount > 0) {
       const saved = saveBaseline(metrics);
       setBaseline(saved);
       setHistory([{ takenAt: saved.setOn, metrics }]);
@@ -145,7 +144,8 @@ export default function TheGrovePage() {
     setShowResetModal(false);
   }, [metrics]);
 
-  const hasData = metrics.unitCount > 0;
+  const isLoading = syncStatus === "loading" && !metrics;
+  const hasData = !!metrics && metrics.unitCount > 0;
 
   return (
     <div
@@ -235,7 +235,6 @@ export default function TheGrovePage() {
                 status={syncStatus}
                 snapshot={serverSnapshot}
                 error={syncError}
-                configured={blobConfigured}
               />
               <button
                 type="button"
@@ -271,32 +270,50 @@ export default function TheGrovePage() {
 
         {/* Main */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 grove-stagger">
-          {/* Data hygiene warning */}
-          {metrics.dataHygieneWarnings.length > 0 && (
-            <div className="rounded-lg border border-[color:var(--grove-yellow)]/30 bg-[color:var(--grove-yellow)]/10 px-4 py-3 flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-[color:var(--grove-yellow)] shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <div className="text-sm font-semibold text-[color:var(--grove-yellow)]">Data hygiene</div>
-                <ul className="mt-1 space-y-0.5 text-xs text-[color:var(--grove-muted)]">
-                  {metrics.dataHygieneWarnings.map((w, i) => (
-                    <li key={i}>• {w}</li>
-                  ))}
-                </ul>
-              </div>
+
+          {/* Loading skeleton — shown only on first visit before cache is available */}
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-32 gap-4">
+              <div className="h-10 w-10 rounded-full border-2 border-[color:var(--grove-blue)] border-t-transparent animate-spin" />
+              <div className="text-sm text-[color:var(--grove-muted)]">Loading latest data…</div>
             </div>
           )}
 
-          <ScoreCard
-            metrics={metrics}
-            baseline={baseline?.metrics ?? null}
-            baselineSetOn={baseline?.setOn ?? null}
-            lastUpdated={metrics.asOf}
-          />
+          {!isLoading && metrics && (
+            <>
+              {parseError && (
+                <div className="rounded-lg border border-[color:var(--grove-red)]/40 bg-[color:var(--grove-red)]/10 px-4 py-3 flex items-center gap-2 text-sm text-[color:var(--grove-red)]">
+                  <AlertTriangle className="h-4 w-4" />
+                  {parseError}
+                </div>
+              )}
 
-          <LeasingSection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
-          <DelinquencySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
-          <RenovationsSection metrics={metrics} baseline={baseline?.metrics ?? null} />
-          <OccupancySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
+              {metrics.dataHygieneWarnings.length > 0 && (
+                <div className="rounded-lg border border-[color:var(--grove-yellow)]/30 bg-[color:var(--grove-yellow)]/10 px-4 py-3 flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-[color:var(--grove-yellow)] shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-[color:var(--grove-yellow)]">Data hygiene</div>
+                    <ul className="mt-1 space-y-0.5 text-xs text-[color:var(--grove-muted)]">
+                      {metrics.dataHygieneWarnings.map((w, i) => (
+                        <li key={i}>• {w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              <ScoreCard
+                metrics={metrics}
+                baseline={baseline?.metrics ?? null}
+                baselineSetOn={baseline?.setOn ?? null}
+                lastUpdated={metrics.asOf}
+              />
+              <LeasingSection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
+              <DelinquencySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
+              <RenovationsSection metrics={metrics} baseline={baseline?.metrics ?? null} />
+              <OccupancySection metrics={metrics} baseline={baseline?.metrics ?? null} history={history} />
+            </>
+          )}
         </main>
 
         {/* Reset baseline modal */}
@@ -346,65 +363,29 @@ export default function TheGrovePage() {
   );
 }
 
-function SyncBadge({
-  status,
-  snapshot,
-  error,
-  configured,
-}: {
-  status: SyncStatus;
-  snapshot: ServerSnapshot | null;
-  error: string | null;
-  configured: boolean | null;
-}) {
+function SyncBadge({ status, snapshot, error }: { status: SyncStatus; snapshot: ServerSnapshot | null; error: string | null }) {
   if (status === "loading") {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-border)] text-[color:var(--grove-muted)]">
         <CloudUpload className="h-3.5 w-3.5 animate-pulse" />
-        Loading shared data…
+        Loading…
       </span>
     );
   }
-  if (status === "uploading") {
+  if (status === "error") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-blue)]/40 bg-[color:var(--grove-blue)]/10 text-[color:var(--grove-blue)]">
-        <CloudUpload className="h-3.5 w-3.5 animate-pulse" />
-        Saving to shared link…
-      </span>
-    );
-  }
-  // Only surface a "Sync failed" error if sharing is set up. When Blob isn't
-  // configured, the banner above explains the situation — no alarming chip.
-  if (status === "error" && configured !== false) {
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-red)]/40 bg-[color:var(--grove-red)]/10 text-[color:var(--grove-red)]"
-        title={error ?? ""}
-      >
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-red)]/40 bg-[color:var(--grove-red)]/10 text-[color:var(--grove-red)]" title={error ?? ""}>
         <AlertTriangle className="h-3.5 w-3.5" />
-        Sync failed
+        Load failed
       </span>
     );
   }
   if (snapshot) {
-    const when = new Date(snapshot.uploadedAt).toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
+    const when = new Date(snapshot.uploadedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-green)]/40 bg-[color:var(--grove-green)]/10 text-[color:var(--grove-green)]">
         <Check className="h-3.5 w-3.5" />
-        Shared · {when}
-      </span>
-    );
-  }
-  if (configured === false) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-[color:var(--grove-border)] text-[color:var(--grove-muted)]">
-        <CloudUpload className="h-3.5 w-3.5" />
-        Sharing not set up
+        Data as of {when}
       </span>
     );
   }
