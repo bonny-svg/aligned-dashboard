@@ -59,13 +59,13 @@ export default function LeasingSection({ metrics, baseline, history }: Props) {
         />
         <HeroMetric
           icon={FileSignature}
-          label="Signed Leases"
-          value={`${metrics.signedLeasesCount}`}
-          subLabel="Vacant-Leased units with signed lease"
+          label="Leases Signed MTD"
+          value={`${metrics.signedLeasesMTD}`}
+          subLabel="Signed this month (pending + moved in)"
           status="neutral"
-          delta={delta(metrics.signedLeasesCount, baseline?.signedLeasesCount ?? null)}
+          delta={delta(metrics.signedLeasesMTD, baseline?.signedLeasesMTD ?? null)}
           deltaFormat="number"
-          sparkValues={sparkSeries(history, (m) => m.signedLeasesCount)}
+          sparkValues={sparkSeries(history, (m) => m.signedLeasesMTD)}
           size="lg"
         />
       </div>

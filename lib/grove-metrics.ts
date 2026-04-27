@@ -35,6 +35,7 @@ export interface GroveMetrics {
 
   // Leasing
   signedLeasesCount: number;
+  signedLeasesMTD: number;
   moveOutsCount: number;
   netLeasingVelocity: number; // signed - moveouts
   netLeasingVelocityScore: number; // 0-100
@@ -195,6 +196,14 @@ export function computeMetrics(
       return !isNaN(d.getTime()) && d.getMonth() === thisMonth && d.getFullYear() === thisYear;
     })
     .map((u) => ({ unit: u.unit, residentName: u.residentName, leaseStart: u.leaseStart }));
+
+  // MTD signed leases: pending (availability leaseSigned this month) + already moved in (leaseStart this month)
+  const signedThisMonthPending = availability.filter((u) => {
+    if (!u.leaseSigned) return false;
+    const d = new Date(u.leaseSigned);
+    return !isNaN(d.getTime()) && d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+  }).length;
+  const signedLeasesMTD = signedThisMonthPending + leaseStartsThisMonth.length;
 
   // Use NTV units' lease-end date as the expected move-out date (moveInOut on occupied units
   // is the original move-in date, not a future vacate date).
@@ -370,6 +379,7 @@ export function computeMetrics(
     economicOccupancyPct,
     lossToLeasePct,
     signedLeasesCount,
+    signedLeasesMTD,
     moveOutsCount,
     netLeasingVelocity,
     netLeasingVelocityScore,
@@ -422,6 +432,7 @@ export function emptyMetrics(): GroveMetrics {
     economicOccupancyPct: 0,
     lossToLeasePct: 0,
     signedLeasesCount: 0,
+    signedLeasesMTD: 0,
     moveOutsCount: 0,
     netLeasingVelocity: 0,
     netLeasingVelocityScore: 0,
