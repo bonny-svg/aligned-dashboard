@@ -30,6 +30,7 @@ export interface GroveMetrics {
 
   gpr: number;
   totalLeaseRent: number;
+  economicOccupancyPct: number;
   lossToLeasePct: number;
 
   // Leasing
@@ -122,6 +123,7 @@ export function computeMetrics(
   const occupiedMarketRent = rentRoll
     .filter((u) => u.status === "Occupied" || u.status === "Occupied-NTV")
     .reduce((s, u) => s + u.marketRent, 0);
+  const economicOccupancyPct = gpr > 0 ? (totalLeaseRent / gpr) * 100 : 0;
   const lossToLeasePct =
     occupiedMarketRent > 0 ? ((occupiedMarketRent - totalLeaseRent) / occupiedMarketRent) * 100 : 0;
 
@@ -367,6 +369,7 @@ export function computeMetrics(
     projected60DayOccupancyPct,
     gpr,
     totalLeaseRent,
+    economicOccupancyPct,
     lossToLeasePct,
     signedLeasesCount,
     moveOutsCount,
@@ -418,6 +421,7 @@ export function emptyMetrics(): GroveMetrics {
     projected60DayOccupancyPct: 0,
     gpr: 0,
     totalLeaseRent: 0,
+    economicOccupancyPct: 0,
     lossToLeasePct: 0,
     signedLeasesCount: 0,
     moveOutsCount: 0,

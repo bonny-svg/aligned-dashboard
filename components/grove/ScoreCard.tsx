@@ -1,6 +1,6 @@
 "use client";
 
-import { Users, AlertTriangle, Wrench, Building2 } from "lucide-react";
+import { Building2, DollarSign, TrendingUp } from "lucide-react";
 import GaugeRing from "./GaugeRing";
 import TrendArrow from "./TrendArrow";
 import type { GroveMetrics } from "@/lib/grove-metrics";
@@ -15,60 +15,55 @@ interface ScoreCardProps {
 }
 
 export default function ScoreCard({ metrics, baseline, baselineSetOn, lastUpdated }: ScoreCardProps) {
+  // Leasing velocity gauge: 50 = neutral (0 net), clamped 0–100
+  const velocityGaugePct = Math.max(0, Math.min(100, 50 + metrics.netLeasingVelocity * 5));
+  const velocityStatus: "good" | "warn" | "bad" = metrics.netLeasingVelocity >= 3
+    ? "good"
+    : metrics.netLeasingVelocity >= 0
+    ? "warn"
+    : "bad";
+
   const rings = [
     {
-      label: "Leasing Health",
-      icon: Users,
-      value: Math.round(metrics.netLeasingVelocityScore),
-      display: `${Math.round(metrics.netLeasingVelocityScore)}`,
-      percent: metrics.netLeasingVelocityScore,
-      status: scoreToStatus(metrics.netLeasingVelocityScore, THRESHOLDS.leasingVelocity, true),
-      delta: delta(metrics.netLeasingVelocityScore, baseline?.netLeasingVelocityScore ?? null),
-      higherIsBetter: true,
-    },
-    {
-      label: "Delinquency Health",
-      icon: AlertTriangle,
-      value: Math.round(metrics.delinquencyScore),
-      display: `${Math.round(metrics.delinquencyScore)}`,
-      percent: metrics.delinquencyScore,
-      status: scoreToStatus(metrics.delinquencyScore, THRESHOLDS.delinquencyScore, true),
-      delta: delta(metrics.delinquencyScore, baseline?.delinquencyScore ?? null),
-      higherIsBetter: true,
-    },
-    {
-      label: "Renovation Health",
-      icon: Wrench,
-      value: metrics.rentReadyRatio,
-      display: `${metrics.rentReadyRatio.toFixed(0)}%`,
-      percent: metrics.rentReadyRatio,
-      status: scoreToStatus(metrics.rentReadyRatio, THRESHOLDS.renovationRatio, true),
-      delta: delta(metrics.rentReadyRatio, baseline?.rentReadyRatio ?? null),
-      higherIsBetter: true,
-    },
-    {
-      label: "Occupancy Health",
+      label: "Current Occupancy",
       icon: Building2,
-      value: metrics.physicalOccupancyPct,
       display: `${metrics.physicalOccupancyPct.toFixed(1)}%`,
       percent: metrics.physicalOccupancyPct,
       status: scoreToStatus(metrics.physicalOccupancyPct, THRESHOLDS.occupancy, true),
       delta: delta(metrics.physicalOccupancyPct, baseline?.physicalOccupancyPct ?? null),
       higherIsBetter: true,
     },
+    {
+      label: "Economic Occupancy",
+      icon: DollarSign,
+      display: `${metrics.economicOccupancyPct.toFixed(1)}%`,
+      percent: metrics.economicOccupancyPct,
+      status: scoreToStatus(metrics.economicOccupancyPct, THRESHOLDS.occupancy, true),
+      delta: delta(metrics.economicOccupancyPct, baseline?.economicOccupancyPct ?? null),
+      higherIsBetter: true,
+    },
+    {
+      label: "Leasing Velocity",
+      icon: TrendingUp,
+      display: `${metrics.netLeasingVelocity > 0 ? "+" : ""}${metrics.netLeasingVelocity}`,
+      percent: velocityGaugePct,
+      status: velocityStatus,
+      delta: delta(metrics.netLeasingVelocity, baseline?.netLeasingVelocity ?? null),
+      higherIsBetter: true,
+    },
   ];
 
-  // Auto-narrative: worst performing ring
-  const worst = [...rings].sort((a, b) => a.percent - b.percent)[0];
+  // Narrative: highlight the most pressing issue
+  const physOcc = metrics.physicalOccupancyPct;
   let narrative = "";
-  if (worst.label === "Delinquency Health") {
-    narrative = `Focus area: Delinquency — $${(metrics.totalDelinquent / 1000).toFixed(0)}K across ${metrics.delinquentCount} residents requires immediate attention.`;
-  } else if (worst.label === "Renovation Health") {
-    narrative = `Focus area: Renovations — only ${metrics.rentReadyCount} of ${metrics.vacantTotalCount} vacant units are rent-ready.`;
-  } else if (worst.label === "Leasing Health") {
-    narrative = `Focus area: Leasing — net velocity is ${metrics.netLeasingVelocity > 0 ? "+" : ""}${metrics.netLeasingVelocity} leases this period.`;
-  } else if (worst.label === "Occupancy Health") {
-    narrative = `Focus area: Occupancy — ${metrics.physicalOccupancyPct.toFixed(1)}% physical, ${288 - metrics.occupiedCount - metrics.occupiedNTVCount} units need residents.`;
+  if (metrics.netLeasingVelocity < 0) {
+    narrative = `Leasing velocity is negative (${metrics.netLeasingVelocity}) — ${metrics.signedLeasesCount} leases signed vs ${metrics.moveOutsCount} scheduled move-outs.`;
+  } else if (physOcc < 90) {
+    narrative = `Occupancy at ${physOcc.toFixed(1)}% — ${288 - metrics.occupiedCount - metrics.occupiedNTVCount} units need residents.`;
+  } else if (metrics.economicOccupancyPct < metrics.physicalOccupancyPct - 5) {
+    narrative = `Economic occupancy (${metrics.economicOccupancyPct.toFixed(1)}%) trails physical occupancy by ${(metrics.physicalOccupancyPct - metrics.economicOccupancyPct).toFixed(1)} pts — check loss-to-lease.`;
+  } else {
+    narrative = `${metrics.signedLeasesCount} leases signed, ${metrics.moveOutsCount} scheduled move-outs — net velocity ${metrics.netLeasingVelocity > 0 ? "+" : ""}${metrics.netLeasingVelocity}.`;
   }
 
   return (
@@ -98,7 +93,7 @@ export default function ScoreCard({ metrics, baseline, baselineSetOn, lastUpdate
           </span>
         </span>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         {rings.map((r) => (
           <div
             key={r.label}
