@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+// useCallback retained for handleResetBaseline
 import {
   MapPin,
   Home,
@@ -9,12 +10,10 @@ import {
   RefreshCw,
   AlertTriangle,
   X,
-  FileSpreadsheet,
   CloudUpload,
   Check,
   Share2,
 } from "lucide-react";
-import FileDropZone, { UploadedFiles } from "@/components/grove/FileDropZone";
 import ScoreCard from "@/components/grove/ScoreCard";
 import LeasingSection from "@/components/grove/LeasingSection";
 import DelinquencySection from "@/components/grove/DelinquencySection";
@@ -48,7 +47,7 @@ interface ServerSnapshot {
 }
 
 export default function TheGrovePage() {
-  const [files, setFiles] = useState<UploadedFiles>({});
+  const [files, setFiles] = useState<{ rentRoll?: { name: string; buffer: ArrayBuffer }; availability?: { name: string; buffer: ArrayBuffer }; residentBalances?: { name: string; buffer: ArrayBuffer } }>({});
   const [rentRoll, setRentRoll] = useState<RentRollUnit[]>([]);
   const [availability, setAvailability] = useState<AvailabilityUnit[]>([]);
   const [balances, setBalances] = useState<ResidentBalance[]>([]);
@@ -113,51 +112,6 @@ export default function TheGrovePage() {
       setParseError(err instanceof Error ? err.message : "Failed to parse files");
     }
   }, [files]);
-
-  // When the user has uploaded a fresh set of 3 files locally, push them to the server
-  // so collaborators see the same data. We only push when all 3 are present AND they
-  // differ from what the server currently has (i.e., this upload didn't come FROM the server).
-  const handleFilesReady = useCallback(
-    async (next: UploadedFiles) => {
-      setFiles(next);
-      const complete = next.rentRoll && next.availability && next.residentBalances;
-      if (!complete) return;
-
-      // Skip upload if these buffers came from the server snapshot (same sizes).
-      if (
-        serverSnapshot &&
-        next.rentRoll &&
-        next.availability &&
-        next.residentBalances &&
-        next.rentRoll.name.startsWith("Rent Roll") &&
-        files.rentRoll?.buffer === next.rentRoll.buffer
-      ) {
-        return;
-      }
-
-      // If Vercel Blob isn't set up yet, skip the server upload entirely —
-      // the setup banner explains why. Files still parse locally.
-      if (blobConfigured === false) return;
-
-      setSyncStatus("uploading");
-      setSyncError(null);
-      try {
-        const fd = new FormData();
-        fd.append("rentRoll", new Blob([next.rentRoll!.buffer]), next.rentRoll!.name);
-        fd.append("availability", new Blob([next.availability!.buffer]), next.availability!.name);
-        fd.append("residentBalances", new Blob([next.residentBalances!.buffer]), next.residentBalances!.name);
-        const res = await fetch("/api/grove/snapshot", { method: "POST", body: fd });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error || `Upload failed (${res.status})`);
-        setServerSnapshot(body);
-        setSyncStatus("saved");
-      } catch (err) {
-        setSyncStatus("error");
-        setSyncError(err instanceof Error ? err.message : "Upload failed");
-      }
-    },
-    [serverSnapshot, files.rentRoll, blobConfigured]
-  );
 
   const metrics = useMemo<GroveMetrics>(() => {
     if (rentRoll.length === 0 && availability.length === 0 && balances.length === 0) {
@@ -317,33 +271,6 @@ export default function TheGrovePage() {
 
         {/* Main */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 grove-stagger">
-          {/* File dropzone */}
-          <div className="grove-no-print">
-            <FileDropZone onFilesReady={handleFilesReady} uploaded={files} />
-          </div>
-
-          {parseError && (
-            <div className="rounded-lg border border-[color:var(--grove-red)]/40 bg-[color:var(--grove-red)]/10 px-4 py-3 flex items-center gap-2 text-sm text-[color:var(--grove-red)] grove-no-print">
-              <AlertTriangle className="h-4 w-4" />
-              {parseError}
-            </div>
-          )}
-
-          {blobConfigured === false && (
-            <div className="rounded-lg border border-[color:var(--grove-blue)]/30 bg-[color:var(--grove-blue)]/5 px-4 py-3 flex items-start gap-3 grove-no-print">
-              <CloudUpload className="h-5 w-5 text-[color:var(--grove-blue)] shrink-0 mt-0.5" />
-              <div className="flex-1 text-sm">
-                <div className="font-semibold text-[color:var(--grove-text)]">Sharing not set up yet</div>
-                <div className="text-[color:var(--grove-muted)] mt-0.5">
-                  Right now, uploaded files only live in your browser. To share a live link with coworkers,
-                  enable Vercel Blob in your Vercel project:{" "}
-                  <span className="text-[color:var(--grove-text)]">Dashboard → Storage → Create Database → Blob → Connect to this project</span>.
-                  After it&rsquo;s enabled, redeploy once and uploads will auto-persist.
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Data hygiene warning */}
           {metrics.dataHygieneWarnings.length > 0 && (
             <div className="rounded-lg border border-[color:var(--grove-yellow)]/30 bg-[color:var(--grove-yellow)]/10 px-4 py-3 flex items-start gap-3">
@@ -484,19 +411,3 @@ function SyncBadge({
   return null;
 }
 
-function EmptyState() {
-  return (
-    <div className="rounded-2xl border border-dashed border-[color:var(--grove-border)] bg-[color:var(--grove-card)] p-12 text-center">
-      <div className="h-16 w-16 rounded-xl bg-[color:var(--grove-blue)]/15 flex items-center justify-center mx-auto mb-4">
-        <FileSpreadsheet className="h-8 w-8 text-[color:var(--grove-blue)]" />
-      </div>
-      <h3 className="text-lg font-semibold text-[color:var(--grove-text)]">Upload your 3 OneSite reports to begin</h3>
-      <p className="text-sm text-[color:var(--grove-muted)] mt-2 max-w-md mx-auto">
-        Drop <span className="font-medium text-[color:var(--grove-text)]">Rent Roll Detail</span>,{" "}
-        <span className="font-medium text-[color:var(--grove-text)]">Availability</span>, and{" "}
-        <span className="font-medium text-[color:var(--grove-text)]">Resident Balances by Fiscal Period</span> above. The
-        first upload becomes the baseline against which every future snapshot is measured.
-      </p>
-    </div>
-  );
-}
