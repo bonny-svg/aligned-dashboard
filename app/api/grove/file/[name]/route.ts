@@ -12,10 +12,11 @@ import { list } from "@vercel/blob";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const FILES: Record<string, string> = {
-  rentRoll:         "grove/latest/rent-roll.xls",
-  availability:     "grove/latest/availability.xls",
-  residentBalances: "grove/latest/resident-balances.xls",
+const FILES: Record<string, { path: string; contentType: string }> = {
+  rentRoll:         { path: "grove/latest/rent-roll.xls",         contentType: "application/vnd.ms-excel" },
+  availability:     { path: "grove/latest/availability.xls",      contentType: "application/vnd.ms-excel" },
+  residentBalances: { path: "grove/latest/resident-balances.xls", contentType: "application/vnd.ms-excel" },
+  metrics:          { path: "grove/latest/metrics.json",          contentType: "application/json" },
 };
 
 export async function GET(
@@ -27,14 +28,14 @@ export async function GET(
     return NextResponse.json({ error: "Blob not configured." }, { status: 500 });
   }
 
-  const pathname = FILES[params.name];
-  if (!pathname) {
+  const file = FILES[params.name];
+  if (!file) {
     return NextResponse.json({ error: "Unknown file key." }, { status: 404 });
   }
 
   try {
     const { blobs } = await list({ prefix: "grove/latest/" });
-    const blob = blobs.find((b) => b.pathname === pathname);
+    const blob = blobs.find((b) => b.pathname === file.path);
     if (!blob) {
       return NextResponse.json({ error: "File not found in Blob store." }, { status: 404 });
     }
@@ -53,7 +54,7 @@ export async function GET(
     return new NextResponse(upstream.body, {
       status: 200,
       headers: {
-        "Content-Type": "application/vnd.ms-excel",
+        "Content-Type": file.contentType,
         "Cache-Control": "no-store",
       },
     });

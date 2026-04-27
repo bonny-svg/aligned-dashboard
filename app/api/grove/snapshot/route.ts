@@ -16,6 +16,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { put, list, BlobNotFoundError } from "@vercel/blob";
+import { parseRentRoll, parseAvailability, parseResidentBalances } from "@/lib/grove-parsers";
+import { computeMetrics } from "@/lib/grove-metrics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +26,7 @@ const FILES = {
   rentRoll:         "grove/latest/rent-roll.xls",
   availability:     "grove/latest/availability.xls",
   residentBalances: "grove/latest/resident-balances.xls",
+  metrics:          "grove/latest/metrics.json",
 } as const;
 
 interface JsonFile { filename?: string; base64: string }
@@ -109,15 +112,32 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Store the 3 Excel files and compute metrics in parallel where possible.
+    const [rrBuf, avBuf, rbBuf] = [
+      Buffer.isBuffer(rentRollBody)         ? rentRollBody         : Buffer.from(await (rentRollBody as Blob).arrayBuffer()),
+      Buffer.isBuffer(availabilityBody)     ? availabilityBody     : Buffer.from(await (availabilityBody as Blob).arrayBuffer()),
+      Buffer.isBuffer(residentBalancesBody) ? residentBalancesBody : Buffer.from(await (residentBalancesBody as Blob).arrayBuffer()),
+    ];
+
+    // Compute metrics server-side so the client only needs to fetch JSON.
+    // Slice each buffer to get a true ArrayBuffer (Node Buffer.buffer may be pooled/shared).
+    const toAB = (b: Buffer): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+    const metrics = computeMetrics(
+      parseRentRoll(toAB(rrBuf)),
+      parseAvailability(toAB(avBuf)),
+      parseResidentBalances(toAB(rbBuf))
+    );
+    const uploadedAt = new Date().toISOString();
+    const metricsPayload = JSON.stringify({ uploadedAt, metrics });
+
     const [rr, av, rb] = await Promise.all([
-      putAdaptive(FILES.rentRoll,         rentRollBody,         "application/vnd.ms-excel"),
-      putAdaptive(FILES.availability,     availabilityBody,     "application/vnd.ms-excel"),
-      putAdaptive(FILES.residentBalances, residentBalancesBody, "application/vnd.ms-excel"),
+      putAdaptive(FILES.rentRoll,         rrBuf,  "application/vnd.ms-excel"),
+      putAdaptive(FILES.availability,     avBuf,  "application/vnd.ms-excel"),
+      putAdaptive(FILES.residentBalances, rbBuf,  "application/vnd.ms-excel"),
+      putAdaptive(FILES.metrics, Buffer.from(metricsPayload), "application/json"),
     ]);
-    return NextResponse.json({
-      uploadedAt: new Date().toISOString(),
-      urls: { rentRoll: rr.url, availability: av.url, residentBalances: rb.url },
-    });
+
+    return NextResponse.json({ uploadedAt, urls: { rentRoll: rr.url, availability: av.url, residentBalances: rb.url } });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Blob write failed." },
@@ -136,14 +156,12 @@ export async function GET() {
     const rr = blobs.find((b) => b.pathname === FILES.rentRoll);
     const av = blobs.find((b) => b.pathname === FILES.availability);
     const rb = blobs.find((b) => b.pathname === FILES.residentBalances);
+    const mx = blobs.find((b) => b.pathname === FILES.metrics);
 
     if (!rr || !av || !rb) {
       return NextResponse.json({ snapshot: null, configured: true });
     }
 
-    // Return proxy URLs that stream from our /api/grove/file/[name] route.
-    // Direct Vercel Blob URLs for private stores return 403 to browsers —
-    // the proxy handles auth server-side.
     const uploadedAt = [rr, av, rb]
       .map((b) => new Date(b.uploadedAt).getTime())
       .reduce((a, b) => Math.max(a, b), 0);
@@ -151,6 +169,9 @@ export async function GET() {
     return NextResponse.json({
       snapshot: {
         uploadedAt: new Date(uploadedAt).toISOString(),
+        // metricsUrl is present when the JSON was pre-computed at upload time.
+        // The client uses it directly and skips the 3 Excel downloads entirely.
+        metricsUrl: mx ? "/api/grove/file/metrics" : null,
         urls: {
           rentRoll:         "/api/grove/file/rentRoll",
           availability:     "/api/grove/file/availability",

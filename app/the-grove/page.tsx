@@ -56,6 +56,7 @@ type SyncStatus = "idle" | "loading" | "saved" | "error";
 
 interface ServerSnapshot {
   uploadedAt: string;
+  metricsUrl: string | null;
   urls: { rentRoll: string; availability: string; residentBalances: string };
 }
 
@@ -98,16 +99,21 @@ export default function TheGrovePage() {
           return;
         }
 
-        // Newer data — download all 3 files and recompute.
-        const [rr, av, rb] = await Promise.all([
-          fetch(data.snapshot.urls.rentRoll).then((r) => r.arrayBuffer()),
-          fetch(data.snapshot.urls.availability).then((r) => r.arrayBuffer()),
-          fetch(data.snapshot.urls.residentBalances).then((r) => r.arrayBuffer()),
-        ]);
-        const rentRoll = parseRentRoll(rr);
-        const availability = parseAvailability(av);
-        const balances = parseResidentBalances(rb);
-        const computed = computeMetrics(rentRoll, availability, balances);
+        // Newer data — use pre-computed JSON if available (fast path),
+        // otherwise fall back to downloading and parsing the 3 Excel files.
+        let computed: GroveMetrics;
+        if (data.snapshot.metricsUrl) {
+          const mres = await fetch(data.snapshot.metricsUrl);
+          const mjson = await mres.json() as { uploadedAt: string; metrics: GroveMetrics };
+          computed = mjson.metrics;
+        } else {
+          const [rr, av, rb] = await Promise.all([
+            fetch(data.snapshot.urls.rentRoll).then((r) => r.arrayBuffer()),
+            fetch(data.snapshot.urls.availability).then((r) => r.arrayBuffer()),
+            fetch(data.snapshot.urls.residentBalances).then((r) => r.arrayBuffer()),
+          ]);
+          computed = computeMetrics(parseRentRoll(rr), parseAvailability(av), parseResidentBalances(rb));
+        }
         setMetrics(computed);
         saveMetricsCache(data.snapshot.uploadedAt, computed);
         setSyncStatus("idle");
