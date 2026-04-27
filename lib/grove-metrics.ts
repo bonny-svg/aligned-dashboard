@@ -283,25 +283,24 @@ export function computeMetrics(
   const collectionRatePct = totalChargesMTD > 0 ? (collectedMTD / totalChargesMTD) * 100 : 0;
 
   // ─── Renovations ─────────────────────────────────────────────────────────
-  // Ready TODAY = makeReady date is set and is today or in the past (across all sections).
-  // Vacant-Leased units are NOT automatically ready — they're in "NotReady" by definition.
+  // Every unit appearing in the availability report is "not ready" — that's why
+  // it's tracked there. Rent-ready = vacant units (rent roll) NOT listed as NotReady.
   const vacantTotalCount = vacCount + vacLeasedCount;
-  const rentReadyCount = availability.filter((u) => {
-    if (!u.makeReady) return false;
-    const days = daysBetween(u.makeReady);
-    return days != null && days <= 0;
-  }).length;
+  const notReadyUnits = availability.filter(
+    (u) => u.section === "VacantNotLeasedNotReady" || u.section === "VacantLeasedNotReady"
+  );
+  const rentReadyCount = Math.max(0, vacantTotalCount - notReadyUnits.length);
   const rentReadyRatio = vacantTotalCount > 0 ? (rentReadyCount / vacantTotalCount) * 100 : 0;
 
-  // In process = makeReady date set but still in the future
-  const inProcessCount = availability.filter((u) => {
+  // In process = NotReady unit with a future make-ready date
+  const inProcessCount = notReadyUnits.filter((u) => {
     if (!u.makeReady) return false;
     const days = daysBetween(u.makeReady);
     return days != null && days > 0;
   }).length;
 
-  // Not started = no make-ready date at all
-  const notStartedCount = availability.filter((u) => !u.makeReady).length;
+  // Not started = NotReady unit with no make-ready date at all
+  const notStartedCount = notReadyUnits.filter((u) => !u.makeReady).length;
 
   // Pre-leased but not ready = VacantLeasedNotReady units whose make-ready date
   // is still in the future (or missing), meaning work isn't done before move-in.
