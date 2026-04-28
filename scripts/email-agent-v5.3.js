@@ -197,22 +197,38 @@ function isTowneEastOneSiteBundle(attachments) {
   return (found.rentRoll && found.availability && found.residentBalances) ? found : null;
 }
 
+// Converts OneSite XLS files to CSV text and uses Claude to extract metrics.
+// Avoids sending large binary files to Vercel (which hits payload size limits).
 function uploadTowneEastSnapshot(bundle) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
-  const payload = JSON.stringify({
-    rentRoll:         { base64: attachmentBase64(bundle.rentRoll) },
-    availability:     { base64: attachmentBase64(bundle.availability) },
-    residentBalances: { base64: attachmentBase64(bundle.residentBalances) },
+  Logger.log('  [TE XLS] Converting OneSite files to CSV for Claude extraction...');
+  const msg = [{ type: 'text', text: TE_METRICS_PROMPT }];
+
+  var files = [
+    { key: 'rentRoll',         label: 'RENT ROLL' },
+    { key: 'availability',     label: 'AVAILABILITY' },
+    { key: 'residentBalances', label: 'RESIDENT BALANCES' },
+  ];
+  files.forEach(function(f) {
+    var att = bundle[f.key];
+    if (!att) return;
+    var csv = xlsxToCsv(attachmentBase64(att), att.getContentType(), att.getName());
+    if (csv) msg.push({ type: 'text', text: f.label + ' (CSV):\n' + csv });
+    Utilities.sleep(2000);
   });
-  const resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/snapshot', {
+
+  var metrics = callClaudeJson(msg, 2500);
+  if (!metrics) { Logger.log('  ✗ TE XLS: Claude extraction failed'); return false; }
+
+  var headers = { 'Content-Type': 'application/json' };
+  if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
+  var resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/metrics', {
     method: 'post',
     headers: headers,
-    payload: payload,
+    payload: JSON.stringify({ metrics: metrics }),
     muteHttpExceptions: true,
   });
-  Logger.log('  Towne East snapshot upload status: ' + resp.getResponseCode());
-  if (resp.getResponseCode() >= 300) Logger.log('  TE snapshot err: ' + resp.getContentText().slice(0, 300));
+  Logger.log('  [TE XLS] Metrics upload: ' + resp.getResponseCode());
+  if (resp.getResponseCode() >= 300) Logger.log('  TE XLS err: ' + resp.getContentText().slice(0, 200));
   return resp.getResponseCode() < 300;
 }
 
