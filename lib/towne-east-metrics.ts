@@ -180,7 +180,7 @@ export function computeTowneEastMetrics(
     unitCount: rentRoll.filter(u => u.status !== "Unknown").length,
     occupiedCount: occCount,
     occupiedNTVCount: occNTVCount,
-    vacantCount,
+    vacantCount: vacCount,
     physicalOccupancyPct,
     leasedOccupancyPct,
     gpr,
