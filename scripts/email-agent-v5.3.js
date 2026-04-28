@@ -1,13 +1,11 @@
 // ============================================================
-// AAM Email Agent — Google Apps Script v5.3
-// Changes from v5.2:
-//   • Towne East fast-path: when OneSite xls/xlsx bundle arrives,
-//     upload straight to /api/towne-east/snapshot (mirrors Grove)
-//   • Towne East extras fast-path: delinquency CSV + maintenance CSV
-//     + leasing Excel → /api/towne-east/extras (all fields optional;
-//     sends whatever files are present in the email)
-//   • One email can trigger BOTH TE fast-paths simultaneously
-//   • debugTowneEastEmail() diagnostic added (mirrors debugGroveEmail)
+// AAM Email Agent — Google Apps Script v5.4
+// Changes from v5.3:
+//   • Towne East MMR+PDF fast-path: when the weekly email contains
+//     the MMR Excel and/or OneSite PDFs (Delinquent & Prepaid,
+//     Leasing Activity, Resident Activity), Claude extracts metrics
+//     and POSTs directly to /api/towne-east/metrics — no OneSite
+//     XLS files required. Dashboard populates immediately.
 // ============================================================
 
 const CONFIG = {
@@ -282,6 +280,98 @@ function uploadTowneEastExtras(bundle) {
   return resp.getResponseCode() < 300;
 }
 
+// ── Towne East MMR + PDF fast-path ──────────────────────────
+// Detects the weekly Sunridge email that contains the MMR Excel
+// and/or the three OneSite PDFs (delinquent, leasing, resident).
+// Claude reads all of them and extracts TowneEastMetrics JSON
+// which is POSTed to /api/towne-east/metrics.
+function isTowneEastMMRBundle(attachments) {
+  const found = { mmr: null, delinquency: null, leasingActivity: null, residentActivity: null };
+  attachments.forEach(function(att) {
+    const raw  = att.getName().toLowerCase();
+    const name = raw.replace(/[_+\-\s]+/g, ' ');
+    const mime = att.getContentType() || '';
+    if (!found.mmr && (raw.endsWith('.xlsx') || raw.endsWith('.xls')) &&
+        (name.includes('mmr') || name.includes('monthly management') || name.includes('weekly agenda') || name.includes('te mmr'))) {
+      found.mmr = att; return;
+    }
+    if (!found.delinquency && mime.includes('pdf') &&
+        (name.includes('delinquent') || name.includes('delinquency') || name.includes('prepaid'))) {
+      found.delinquency = att; return;
+    }
+    if (!found.leasingActivity && mime.includes('pdf') &&
+        (name.includes('leasing activ') || name.includes('leasing activity'))) {
+      found.leasingActivity = att; return;
+    }
+    if (!found.residentActivity && mime.includes('pdf') &&
+        (name.includes('resident activ') || name.includes('resident activity'))) {
+      found.residentActivity = att; return;
+    }
+  });
+  return (found.mmr || found.delinquency) ? found : null;
+}
+
+var TE_METRICS_PROMPT =
+  'You are extracting Towne East Village (100-unit, Converse TX) dashboard metrics from the attached reports.\n\n' +
+  'Sources may include: MMR Excel (occupancy, collections), Delinquent and Prepaid PDF (delinquency),\n' +
+  'Leasing Activity PDF (prospects/visits/leases), Resident Activity PDF (move-ins/outs/NTVs/renewals).\n\n' +
+  'Return ONLY the JSON below (no markdown). Use 0 or "" for any field not found.\n\n' +
+  'DELINQUENCY RULES:\n' +
+  '- delinquentBalance = "Net Delinquent" from the grand totals row\n' +
+  '- priorPeriodBalance = "Beginning Balance" grand total\n' +
+  '- newDelinquencyThisPeriod = delinquentBalance - priorPeriodBalance\n' +
+  '- delinquentCount = resident count from the Resident Count row (the delinquent column)\n' +
+  '- topDelinquents = top 5 residents by net balance (positive amounts only, include unit number)\n\n' +
+  '{"asOf":"YYYY-MM-DD","unitCount":100,"occupiedCount":0,"occupiedNTVCount":0,"vacantCount":0,' +
+  '"physicalOccupancyPct":0,"leasedOccupancyPct":0,"gpr":0,"totalLeaseRent":0,"economicOccupancyPct":0,' +
+  '"totalCharged":0,"totalCollected":0,"collectionRatePct":0,' +
+  '"delinquentBalance":0,"priorPeriodBalance":0,"newDelinquencyThisPeriod":0,"delinquentCount":0,' +
+  '"topDelinquents":[{"unit":"","name":"","amount":0}],' +
+  '"moveOutsNTVCount":0,"monthToMonthCount":0,"signedLeasesMTD":0,' +
+  '"expiring30d":0,"expiring60d":0,"expiring90d":0,"leaseExpirationByMonth":[],' +
+  '"moveOutsThisMonth":[{"unit":"","residentName":"","moveOutDate":""}],' +
+  '"leaseStartsThisMonth":[{"unit":"","residentName":"","leaseStart":""}],' +
+  '"vacantTotalCount":0,"notReadyCount":0,"rentReadyCount":0,"inProcessCount":0,"notStartedCount":0}';
+
+function uploadTowneEastFromMMR(bundle) {
+  Logger.log('  [TE MMR] Extracting metrics from MMR+PDF bundle via Claude...');
+  const msg = [{ type: 'text', text: TE_METRICS_PROMPT }];
+
+  // MMR Excel → convert to CSV so Claude can read it as text
+  if (bundle.mmr) {
+    const csv = xlsxToCsv(attachmentBase64(bundle.mmr), bundle.mmr.getContentType(), bundle.mmr.getName());
+    if (csv) msg.push({ type: 'text', text: 'MMR EXCEL (CSV):\n' + csv });
+  }
+  // PDFs sent as native documents
+  if (bundle.delinquency) {
+    msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.delinquency) } });
+    msg.push({ type: 'text', text: 'Above: Delinquent and Prepaid report' });
+  }
+  if (bundle.leasingActivity) {
+    msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.leasingActivity) } });
+    msg.push({ type: 'text', text: 'Above: Leasing Activity Detail' });
+  }
+  if (bundle.residentActivity) {
+    msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.residentActivity) } });
+    msg.push({ type: 'text', text: 'Above: Resident Activity report' });
+  }
+
+  const metrics = callClaudeJson(msg, 2500);
+  if (!metrics) { Logger.log('  ✗ TE MMR: Claude extraction failed'); return false; }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
+  const resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/metrics', {
+    method: 'post',
+    headers: headers,
+    payload: JSON.stringify({ metrics: metrics }),
+    muteHttpExceptions: true,
+  });
+  Logger.log('  [TE MMR] Metrics upload: ' + resp.getResponseCode());
+  if (resp.getResponseCode() >= 300) Logger.log('  TE metrics err: ' + resp.getContentText().slice(0, 300));
+  return resp.getResponseCode() < 300;
+}
+
 // ── Attachment helpers ───────────────────────────────────────
 function attachmentBase64(att) { return Utilities.base64Encode(att.getBytes()); }
 
@@ -320,7 +410,7 @@ function xlsxToCsv(base64Data, mimeType, fileName) {
 
 // ── Main entry ───────────────────────────────────────────────
 function checkNewEmails() {
-  Logger.log('=== AAM Email Agent v5.3 starting ===');
+  Logger.log('=== AAM Email Agent v5.4 starting ===');
 
   const rawThreads = GmailApp.search('is:unread', 0, 10);
   Logger.log('Unread threads: ' + rawThreads.length);
@@ -376,22 +466,27 @@ function checkNewEmails() {
         if (propId === 'towne-east') {
           const teOneSite = isTowneEastOneSiteBundle(attList);
           const teExtras  = isTowneEastExtrasBundle(attList);
+          const teMMR     = !teOneSite && isTowneEastMMRBundle(attList);
 
-          if (teOneSite || teExtras) {
+          if (teOneSite || teExtras || teMMR) {
             Logger.log('[TOWNE EAST AUTO-SYNC] ' + subject);
+            // ① OneSite XLS bundle (most accurate — full parse from raw files)
             if (teOneSite) {
               const ok = uploadTowneEastSnapshot(teOneSite);
               Logger.log(ok ? '  ✓ TE snapshot uploaded' : '  ✗ TE snapshot failed');
-            } else {
-              Logger.log('  ⊘ No complete OneSite bundle (need rent roll + availability + balances)');
             }
+            // ② Platform extras CSVs (delinquency/maintenance/leasing platform reports)
             if (teExtras) {
-              // Small sleep so both uploads don't race on the Blob write
               Utilities.sleep(2000);
               const ok = uploadTowneEastExtras(teExtras);
               Logger.log(ok ? '  ✓ TE extras uploaded' : '  ✗ TE extras failed');
             }
-            return; // done — no Claude needed
+            // ③ MMR + PDF fast-path (runs when OneSite XLS files aren't present)
+            if (teMMR) {
+              const ok = uploadTowneEastFromMMR(teMMR);
+              Logger.log(ok ? '  ✓ TE MMR metrics uploaded' : '  ✗ TE MMR metrics failed');
+            }
+            return; // done
           }
           // Towne East email but no fast-path files → fall through to processReport
         }
