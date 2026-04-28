@@ -15,7 +15,7 @@ const CONFIG = {
   CHECK_INTERVAL:          15,
   REPORT_SHEET_ID:         '1BVcKGUQMXge8LYvUs4t_a3dXmu55nxvCMT5nFq4kiWo',
   PROCESSED_LABEL:         'aam-processed',
-  MAX_FILE_CHARS:          6000,
+  MAX_FILE_CHARS:          20000,
   SLEEP_MS:                60000,
   THREADS_PER_RUN:         1,
   MODEL:                   'claude-sonnet-4-20250514',
@@ -198,18 +198,17 @@ function isTowneEastOneSiteBundle(attachments) {
 }
 
 function uploadTowneEastSnapshot(bundle) {
-  const mp = buildMultipartPayload([
-    { name: 'rentRoll',         att: bundle.rentRoll,         contentType: 'application/vnd.ms-excel' },
-    { name: 'availability',     att: bundle.availability,     contentType: 'application/vnd.ms-excel' },
-    { name: 'residentBalances', att: bundle.residentBalances, contentType: 'application/vnd.ms-excel' },
-  ]);
-  const headers = {};
+  const headers = { 'Content-Type': 'application/json' };
   if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
+  const payload = JSON.stringify({
+    rentRoll:         { base64: attachmentBase64(bundle.rentRoll) },
+    availability:     { base64: attachmentBase64(bundle.availability) },
+    residentBalances: { base64: attachmentBase64(bundle.residentBalances) },
+  });
   const resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/snapshot', {
     method: 'post',
-    contentType: 'multipart/form-data; boundary=' + mp.boundary,
-    payload: mp.body,
     headers: headers,
+    payload: payload,
     muteHttpExceptions: true,
   });
   Logger.log('  Towne East snapshot upload status: ' + resp.getResponseCode());
