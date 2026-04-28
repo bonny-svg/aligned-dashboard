@@ -144,22 +144,24 @@ export async function GET() {
     const rb = blobs.find((b) => b.pathname === FILES.residentBalances);
     const mx = blobs.find((b) => b.pathname === FILES.metrics);
 
-    if (!rr || !av || !rb) {
+    // Return snapshot if we have either the 3 XLS files OR just a metrics.json
+    // (metrics.json can be written directly by the MMR/PDF fast-path in the email agent)
+    if (!mx && (!rr || !av || !rb)) {
       return NextResponse.json({ snapshot: null, configured: true });
     }
 
-    const uploadedAt = [rr, av, rb]
-      .map((b) => new Date(b.uploadedAt).getTime())
-      .reduce((a, b) => Math.max(a, b), 0);
+    const uploadedAt = (rr && av && rb)
+      ? [rr, av, rb].map((b) => new Date(b.uploadedAt).getTime()).reduce((a, b) => Math.max(a, b), 0)
+      : new Date(mx!.uploadedAt).getTime();
 
     return NextResponse.json({
       snapshot: {
         uploadedAt: new Date(uploadedAt).toISOString(),
         metricsUrl: mx ? "/api/towne-east/file/metrics" : null,
         urls: {
-          rentRoll:         "/api/towne-east/file/rentRoll",
-          availability:     "/api/towne-east/file/availability",
-          residentBalances: "/api/towne-east/file/residentBalances",
+          rentRoll:         rr ? "/api/towne-east/file/rentRoll"         : null,
+          availability:     av ? "/api/towne-east/file/availability"     : null,
+          residentBalances: rb ? "/api/towne-east/file/residentBalances" : null,
         },
       },
       configured: true,
