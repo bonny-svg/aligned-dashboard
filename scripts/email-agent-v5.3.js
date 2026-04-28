@@ -465,25 +465,31 @@ function checkNewEmails() {
         if (propId === 'towne-east') {
           const teOneSite = isTowneEastOneSiteBundle(attList);
           const teExtras  = isTowneEastExtrasBundle(attList);
-          const teMMR     = !teOneSite && isTowneEastMMRBundle(attList);
+          const teMMR     = isTowneEastMMRBundle(attList); // always check, even if XLS present
 
           if (teOneSite || teExtras || teMMR) {
             Logger.log('[TOWNE EAST AUTO-SYNC] ' + subject);
-            // ① OneSite XLS bundle (most accurate — full parse from raw files)
+            // ① OneSite XLS bundle — wrapped in try/catch so errors don't block ② and ③
             if (teOneSite) {
-              const ok = uploadTowneEastSnapshot(teOneSite);
-              Logger.log(ok ? '  ✓ TE snapshot uploaded' : '  ✗ TE snapshot failed');
+              try {
+                const ok = uploadTowneEastSnapshot(teOneSite);
+                Logger.log(ok ? '  ✓ TE snapshot uploaded' : '  ✗ TE snapshot failed');
+              } catch(e) { Logger.log('  ✗ TE snapshot error: ' + e.message); }
             }
-            // ② Platform extras CSVs (delinquency/maintenance/leasing platform reports)
+            // ② Platform extras CSVs
             if (teExtras) {
-              Utilities.sleep(2000);
-              const ok = uploadTowneEastExtras(teExtras);
-              Logger.log(ok ? '  ✓ TE extras uploaded' : '  ✗ TE extras failed');
+              try {
+                Utilities.sleep(2000);
+                const ok = uploadTowneEastExtras(teExtras);
+                Logger.log(ok ? '  ✓ TE extras uploaded' : '  ✗ TE extras failed');
+              } catch(e) { Logger.log('  ✗ TE extras error: ' + e.message); }
             }
-            // ③ MMR + PDF fast-path (runs when OneSite XLS files aren't present)
+            // ③ MMR + PDF fast-path — always runs when MMR/PDFs are present
             if (teMMR) {
-              const ok = uploadTowneEastFromMMR(teMMR);
-              Logger.log(ok ? '  ✓ TE MMR metrics uploaded' : '  ✗ TE MMR metrics failed');
+              try {
+                const ok = uploadTowneEastFromMMR(teMMR);
+                Logger.log(ok ? '  ✓ TE MMR metrics uploaded' : '  ✗ TE MMR metrics failed');
+              } catch(e) { Logger.log('  ✗ TE MMR error: ' + e.message); }
             }
             return; // done
           }
