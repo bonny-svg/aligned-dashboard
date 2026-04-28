@@ -61,7 +61,7 @@ const PROPERTY_ROUTING = [
   { id: 'woodland-terrace', match: ['jalisa@gcmultifamily.com', 'amanda@gcmultifamily.com', 'woodland terrace', 'woodland'] },
   { id: 'north-park',       match: ['caitlyn@gcmultifamily.com', 'northpark.manager@gcmultifamily.com', 'veronica', 'north park'] },
   { id: 'hall-street',      match: ['justin@blakeandalder.com', 'hall street'] },
-  { id: 'towne-east',       match: ['sunridge', 'towneeastvillage', 'sunridgeapts', 'towne east', 'te mmr'] },
+  { id: 'towne-east',       match: ['sunridge', 'towneeastvillage', 'sunridgeapts', 'towne east', 'te mmr', 'te weekly', 'te month', 'te report'] },
   { id: 'woodhaven',        match: ['implicity', 'woodhaven'] },
   { id: 'the-grove',        match: ['capstone', 'baylee', 'sara.walker@capstone', 'the grove', 'grove'] },
 ];
