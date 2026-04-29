@@ -358,11 +358,12 @@ var TE_METRICS_PROMPT =
   '- moveOutsThisMonth = NTV units whose leaseEnd falls in the current calendar month\n' +
   '- leaseStartsThisMonth = units whose leaseStart falls in the current calendar month\n\n' +
   'DELINQUENCY RULES:\n' +
-  '- delinquentBalance = "Net Delinquent" from the grand totals row\n' +
-  '- priorPeriodBalance = "Beginning Balance" grand total\n' +
+  '- ONLY include CURRENT residents — exclude any row whose Status column says "Former", "Past", "Previous", or "Evicted"\n' +
+  '- delinquentBalance = sum of "Net Delinquent" / "Ending Delinquent Balance" for current residents only\n' +
+  '- priorPeriodBalance = sum of "Beginning Balance" / "Beginning Delinquent" for current residents only\n' +
   '- newDelinquencyThisPeriod = delinquentBalance - priorPeriodBalance\n' +
-  '- delinquentCount = resident count from the Resident Count row (the delinquent column)\n' +
-  '- topDelinquents = top 5 residents by net balance (positive amounts only, include unit number)\n\n' +
+  '- delinquentCount = number of current residents with a positive delinquent balance\n' +
+  '- topDelinquents = top 5 CURRENT residents by net delinquent balance (positive amounts only, include unit number)\n\n' +
   '{"asOf":"YYYY-MM-DD","unitCount":100,"occupiedCount":0,"occupiedNTVCount":0,"vacantCount":0,' +
   '"physicalOccupancyPct":0,"leasedOccupancyPct":0,"gpr":0,"totalLeaseRent":0,"economicOccupancyPct":0,' +
   '"totalCharged":0,"totalCollected":0,"collectionRatePct":0,' +
