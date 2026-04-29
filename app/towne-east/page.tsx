@@ -5,7 +5,6 @@ import { MapPin, Home, Clock, RefreshCw, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import RenovationSection from "@/components/RenovationSection";
 import CapExSection from "@/components/CapExSection";
 import type { TowneEastMetrics } from "@/lib/towne-east-metrics";
 
@@ -54,10 +53,34 @@ interface LeasingExtras {
   leadToSignedRate: number;
   tourToLeaseRate: number;
 }
+interface RenovationUnit {
+  unit: string;
+  floorplan: string;
+  budget: number;
+  moveOutDate: string;
+  startDate: string;
+  completionDate: string;
+  actualSpend: number;
+  daysUnderConstruction: number;
+  status: string;
+  notes: string;
+}
+interface RenovationData {
+  units: RenovationUnit[];
+  totalBudget: number;
+  totalSpend: number;
+  avgDaysCompleted: number;
+  budgetDays: number;
+  completedCount: number;
+  inProgressCount: number;
+  gettingBidsCount: number;
+  updatedAt: string;
+}
 interface TowneEastExtras {
   delinquency?: DelinquencyExtras;
   maintenance?: MaintenanceExtras;
   leasing?: LeasingExtras;
+  renovation?: RenovationData;
 }
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -746,8 +769,90 @@ export default function TowneEastPage() {
 
         {/* ══ SECTION 4 · RENOVATIONS (Live from Google Sheets) ══ */}
         <section id="renovations" className="scroll-mt-28">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Renovations</h2>
-          <RenovationSection />
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-900">Renovations</h2>
+            {extras?.renovation?.updatedAt && (
+              <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+                Updated {new Date(extras.renovation.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </span>
+            )}
+          </div>
+          {extras?.renovation ? (
+            <>
+              {/* Summary KPI cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                <BudgetCard
+                  label="Avg Days (Completed)"
+                  actual={extras.renovation.avgDaysCompleted}
+                  budget={extras.renovation.budgetDays}
+                  formatVal={(n) => `${n} days`}
+                  higherIsBetter={false}
+                />
+                <BudgetCard
+                  label="Total Spend"
+                  actual={extras.renovation.totalSpend}
+                  budget={extras.renovation.totalBudget}
+                  formatVal={fmt}
+                  higherIsBetter={false}
+                />
+                <StatCard
+                  label="Completed"
+                  value={String(extras.renovation.completedCount)}
+                  color="text-emerald-600"
+                />
+                <StatCard
+                  label="In Progress / Bids"
+                  value={`${extras.renovation.inProgressCount} / ${extras.renovation.gettingBidsCount}`}
+                  color={extras.renovation.inProgressCount > 0 ? "text-amber-600" : "text-gray-900"}
+                />
+              </div>
+
+              {/* Per-unit table */}
+              <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200"><tr>
+                    {["Unit", "Floorplan", "Status", "Days", "Budget", "Actual Spend", "Completion"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {extras.renovation.units.map((u) => {
+                      const overBudget = u.budget > 0 && u.actualSpend > u.budget;
+                      const overDays   = u.daysUnderConstruction > extras.renovation!.budgetDays;
+                      const statusColor = u.status === "Complete" ? "text-emerald-600" : u.status === "In Progress" ? "text-amber-600" : "text-gray-500";
+                      return (
+                        <tr key={u.unit} className="hover:bg-gray-50/60">
+                          <td className="px-4 py-2.5 text-sm font-mono font-semibold text-gray-900">{u.unit}</td>
+                          <td className="px-4 py-2.5 text-sm text-gray-600">{u.floorplan || "—"}</td>
+                          <td className={cn("px-4 py-2.5 text-sm font-medium", statusColor)}>{u.status}</td>
+                          <td className={cn("px-4 py-2.5 text-sm font-medium", overDays ? "text-red-600" : "text-gray-900")}>
+                            {u.daysUnderConstruction > 0 ? u.daysUnderConstruction : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-sm text-gray-600">{u.budget > 0 ? fmt(u.budget) : "—"}</td>
+                          <td className={cn("px-4 py-2.5 text-sm font-medium", overBudget ? "text-red-600" : u.actualSpend > 0 ? "text-gray-900" : "text-gray-400")}>
+                            {u.actualSpend > 0 ? fmt(u.actualSpend) : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-sm text-gray-600">{u.completionDate || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t-2 border-gray-200"><tr>
+                    <td colSpan={4} className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total</td>
+                    <td className="px-4 py-2.5 text-sm font-bold text-gray-700">{fmt(extras.renovation.totalBudget)}</td>
+                    <td className={cn("px-4 py-2.5 text-sm font-bold", extras.renovation.totalSpend > extras.renovation.totalBudget ? "text-red-600" : "text-gray-900")}>
+                      {fmt(extras.renovation.totalSpend)}
+                    </td>
+                    <td />
+                  </tr></tfoot>
+                </table>
+              </div></CardContent></Card>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+              No renovation data yet — the email agent reads the Google Sheet automatically on each run.
+            </div>
+          )}
         </section>
 
         {/* ══ SECTION 5 · CAPEX (Live from Google Sheets) ══ */}

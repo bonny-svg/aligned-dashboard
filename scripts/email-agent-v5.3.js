@@ -201,7 +201,7 @@ function isTowneEastOneSiteBundle(attachments) {
 // Avoids sending large binary files to Vercel (which hits payload size limits).
 function uploadTowneEastSnapshot(bundle) {
   Logger.log('  [TE XLS] Converting OneSite files to CSV for Claude extraction...');
-  const msg = [{ type: 'text', text: TE_METRICS_PROMPT }];
+  const msg = [{ type: 'text', text: tePromptWithDate() }];
 
   var files = [
     { key: 'rentRoll',         label: 'RENT ROLL' },
@@ -329,7 +329,7 @@ function isTowneEastMMRBundle(attachments) {
 var TE_METRICS_PROMPT =
   'You are extracting Towne East Village (100-unit, Converse TX) dashboard metrics from the attached reports.\n\n' +
   'Sources may include: MMR Excel (occupancy, collections), Rent Roll CSV (unit status, lease rent, market rent),\n' +
-  'Availability CSV (vacant unit details), Resident Balances CSV (payments/collections), \n' +
+  'Availability CSV (vacant unit details), Resident Balances CSV (payments/collections),\n' +
   'Delinquent and Prepaid PDF (delinquency), Leasing Activity PDF (prospects/leases),\n' +
   'Resident Activity PDF (move-ins/outs/NTVs/renewals).\n\n' +
   'Return ONLY the JSON below (no markdown). Use 0 or "" for any field not found.\n\n' +
@@ -343,8 +343,20 @@ var TE_METRICS_PROMPT =
   '- economicOccupancyPct = totalLeaseRent / gpr * 100\n\n' +
   'COLLECTIONS RULES (from Resident Balances or MMR):\n' +
   '- totalCharged = sum of "Lease Charges" or "Current Charges" column for current residents\n' +
-  '- totalCollected = sum of "Total Credits" or "Payments Received" or "Cash Receipts" column — this is actual money collected this period\n' +
+  '- totalCollected = sum of "Total Credits" or "Payments Received" or "Cash Receipts" column — actual money received this period\n' +
   '- collectionRatePct = totalCollected / totalCharged * 100\n\n' +
+  'LEASING RULES (from Rent Roll — use TODAY\'S DATE for all date math):\n' +
+  '- expiring30d = count of Occupied/NTV units where leaseEnd is between today and today+30 days\n' +
+  '- expiring60d = count where leaseEnd is between today and today+60 days\n' +
+  '- expiring90d = count where leaseEnd is between today and today+90 days\n' +
+  '- monthToMonthCount = count of Occupied/NTV units where leaseEnd is BEFORE today (expired, no renewal)\n' +
+  '- signedLeasesMTD = count of units where leaseStart falls in the CURRENT calendar month and year\n' +
+  '- moveOutsNTVCount = same as occupiedNTVCount\n' +
+  '- leaseExpirationByMonth = array of 6 objects for the next 6 calendar months (starting this month):\n' +
+  '  each object: { "month": "Mon YYYY", "expiring": N, "ntv": N, "mtm": N }\n' +
+  '  expiring = units with leaseEnd in that month; ntv = NTV units expiring that month; mtm = current month MTM count only\n' +
+  '- moveOutsThisMonth = NTV units whose leaseEnd falls in the current calendar month\n' +
+  '- leaseStartsThisMonth = units whose leaseStart falls in the current calendar month\n\n' +
   'DELINQUENCY RULES:\n' +
   '- delinquentBalance = "Net Delinquent" from the grand totals row\n' +
   '- priorPeriodBalance = "Beginning Balance" grand total\n' +
@@ -362,9 +374,14 @@ var TE_METRICS_PROMPT =
   '"leaseStartsThisMonth":[{"unit":"","residentName":"","leaseStart":""}],' +
   '"vacantTotalCount":0,"notReadyCount":0,"rentReadyCount":0,"inProcessCount":0,"notStartedCount":0}';
 
+function tePromptWithDate() {
+  var today = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd');
+  return 'TODAY\'S DATE: ' + today + '\n\n' + TE_METRICS_PROMPT;
+}
+
 function uploadTowneEastFromMMR(bundle) {
   Logger.log('  [TE MMR] Extracting metrics from MMR+PDF bundle via Claude...');
-  const msg = [{ type: 'text', text: TE_METRICS_PROMPT }];
+  const msg = [{ type: 'text', text: tePromptWithDate() }];
 
   // MMR Excel → convert to CSV so Claude can read it as text
   if (bundle.mmr) {
@@ -435,6 +452,124 @@ function xlsxToCsv(base64Data, mimeType, fileName) {
     if (resp.getResponseCode() !== 200) return null;
     return resp.getContentText().substring(0, CONFIG.MAX_FILE_CHARS);
   } catch(e) { Logger.log('  xlsx→CSV error: ' + e.message); return null; }
+}
+
+// ── Renovation tracker (reads Google Sheet directly) ────────
+var RENOVATION_SHEET_ID = '1Jt9WIaON5joUPNwduptvgRb3PyjyZmsioGGP6KJudh8';
+var RENOVATION_GID      = 546291258;
+
+function readRenovationSheet() {
+  try {
+    var ss = SpreadsheetApp.openById(RENOVATION_SHEET_ID);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getSheetId() === RENOVATION_GID) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) sheet = sheets[0];
+
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return null;
+
+    var headers = data[0].map(function(h) { return String(h).trim(); });
+    var today = new Date();
+    var tz = 'America/Chicago';
+
+    function getCol(row, name) {
+      var idx = headers.indexOf(name);
+      return idx >= 0 ? row[idx] : '';
+    }
+    function parseAmt(v) {
+      var n = parseFloat(String(v || '0').replace(/[$,\s]/g, ''));
+      return isNaN(n) ? 0 : n;
+    }
+    function fmtDate(d) {
+      if (!d) return '';
+      var dt = d instanceof Date ? d : new Date(d);
+      return isNaN(dt.getTime()) ? '' : Utilities.formatDate(dt, tz, 'yyyy-MM-dd');
+    }
+
+    var units = [];
+    var totalBudget = 0, totalSpend = 0;
+    var completedDays = [], completedCount = 0, inProgressCount = 0, gettingBidsCount = 0;
+
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var unit = String(getCol(row, 'Unit') || '').trim();
+      if (!unit) continue;
+      var status = String(getCol(row, 'Status') || '').trim();
+      if (!status || status === 'Not being renovated') continue;
+
+      var budget  = parseAmt(getCol(row, 'Budget'));
+      var spend   = parseAmt(getCol(row, 'Actual Final Spend'));
+      var moveOut = getCol(row, 'Move Out Date');
+      var startDt = getCol(row, 'Start Date');
+      var completion = getCol(row, 'Actual Completion Date');
+
+      // Days = startDate (or moveOut) → completionDate (or today)
+      var refStart = startDt || moveOut;
+      var refEnd   = completion || today;
+      var days = 0;
+      if (refStart) {
+        var s = refStart instanceof Date ? refStart : new Date(refStart);
+        var e = refEnd   instanceof Date ? refEnd   : new Date(refEnd);
+        if (!isNaN(s.getTime()) && !isNaN(e.getTime())) {
+          days = Math.max(0, Math.round((e.getTime() - s.getTime()) / 86400000));
+        }
+      }
+      // Use sheet's own Days column if filled
+      var daysCol = parseFloat(String(getCol(row, 'Days Under Construction') || '')) || 0;
+      if (daysCol > 0) days = daysCol;
+
+      totalBudget += budget;
+      totalSpend  += spend;
+      if (status === 'Complete')       { completedCount++;    if (days > 0) completedDays.push(days); }
+      else if (status === 'In Progress') inProgressCount++;
+      else if (status === 'Getting Bids') gettingBidsCount++;
+
+      units.push({
+        unit: unit,
+        floorplan: String(getCol(row, 'Floorplan') || ''),
+        budget: budget,
+        moveOutDate: fmtDate(moveOut),
+        startDate: fmtDate(startDt),
+        completionDate: fmtDate(completion),
+        actualSpend: spend,
+        daysUnderConstruction: days,
+        status: status,
+        notes: String(getCol(row, 'Notes') || ''),
+      });
+    }
+
+    var avgDays = completedDays.length > 0
+      ? Math.round(completedDays.reduce(function(s,d){return s+d;},0) / completedDays.length)
+      : 0;
+
+    return {
+      units: units,
+      totalBudget: totalBudget,
+      totalSpend: totalSpend,
+      avgDaysCompleted: avgDays,
+      budgetDays: 14,
+      completedCount: completedCount,
+      inProgressCount: inProgressCount,
+      gettingBidsCount: gettingBidsCount,
+      updatedAt: new Date().toISOString(),
+    };
+  } catch(e) { Logger.log('  [Renovation] Sheet read error: ' + e.message); return null; }
+}
+
+function uploadTowneEastRenovation(renovation) {
+  var headers = { 'Content-Type': 'application/json' };
+  if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
+  var resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/extras', {
+    method: 'post', headers: headers,
+    payload: JSON.stringify({ renovation: renovation }),
+    muteHttpExceptions: true,
+  });
+  Logger.log('  [TE Renovation] Upload: ' + resp.getResponseCode());
+  if (resp.getResponseCode() >= 300) Logger.log('  Renovation err: ' + resp.getContentText().slice(0, 200));
+  return resp.getResponseCode() < 300;
 }
 
 // ── Main entry ───────────────────────────────────────────────
@@ -521,6 +656,14 @@ function checkNewEmails() {
                 Logger.log(ok ? '  ✓ TE MMR metrics uploaded' : '  ✗ TE MMR metrics failed');
               } catch(e) { Logger.log('  ✗ TE MMR error: ' + e.message); }
             }
+            // ④ Renovation tracker — always refresh from Google Sheet
+            try {
+              const renovation = readRenovationSheet();
+              if (renovation) {
+                const ok = uploadTowneEastRenovation(renovation);
+                Logger.log(ok ? '  ✓ Renovation data uploaded' : '  ✗ Renovation upload failed');
+              }
+            } catch(e) { Logger.log('  ✗ Renovation error: ' + e.message); }
             return; // done
           }
           // Towne East email but no fast-path files → fall through to processReport
