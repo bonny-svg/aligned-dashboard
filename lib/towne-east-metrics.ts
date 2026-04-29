@@ -89,7 +89,10 @@ export function computeTowneEastMetrics(
   const totalCollected = balances.reduce((s, b) => s + b.totalCredits, 0);
   const collectionRatePct = totalCharged > 0 ? (totalCollected / totalCharged) * 100 : 0;
 
-  const delinquents = balances.filter((b) => b.endingDelinquent > 0);
+  // Only count current residents — exclude former, past, evicted tenants who still carry a balance
+  const delinquents = balances.filter(
+    (b) => b.endingDelinquent > 0 && /current/i.test(b.status)
+  );
   const delinquentBalance        = delinquents.reduce((s, b) => s + b.endingDelinquent, 0);
   const priorPeriodBalance       = delinquents.reduce((s, b) => s + b.beginningDelinquent, 0);
   const newDelinquencyThisPeriod = Math.max(0, delinquentBalance - priorPeriodBalance);
