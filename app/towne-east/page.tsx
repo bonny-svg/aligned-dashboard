@@ -137,6 +137,23 @@ const OCCUPANCY: Record<Month, { actual: number; budget: number }> = {
   mar: { actual: 96.0, budget: 95.0 },
 };
 
+// ─── MONTHLY BUDGET (T12 Budget 2025, fiscal Apr 2025 – Mar 2026) ─────────────
+// Keyed by calendar month (1 = Jan … 12 = Dec). April 2026 uses April 2025 numbers.
+const TE_BUDGET: Record<number, { gpr: number; netRental: number; badDebt: number; physOcc: number; econOcc: number }> = {
+  1:  { gpr: 109_000, netRental: 96_444, badDebt: 1_552, physOcc: 95, econOcc: 88.5 },
+  2:  { gpr: 109_000, netRental: 96_830, badDebt: 1_558, physOcc: 95, econOcc: 88.8 },
+  3:  { gpr: 109_000, netRental: 97_138, badDebt: 1_562, physOcc: 95, econOcc: 89.1 },
+  4:  { gpr: 105_000, netRental: 92_382, badDebt: 1_992, physOcc: 95, econOcc: 88.0 },
+  5:  { gpr: 105_000, netRental: 92_531, badDebt: 1_996, physOcc: 95, econOcc: 88.1 },
+  6:  { gpr: 107_000, netRental: 92_740, badDebt: 2_002, physOcc: 95, econOcc: 86.7 },
+  7:  { gpr: 107_000, netRental: 93_135, badDebt: 2_010, physOcc: 95, econOcc: 87.0 },
+  8:  { gpr: 107_000, netRental: 93_510, badDebt: 2_018, physOcc: 95, econOcc: 87.4 },
+  9:  { gpr: 107_000, netRental: 93_924, badDebt: 2_026, physOcc: 95, econOcc: 87.8 },
+  10: { gpr: 109_000, netRental: 94_334, badDebt: 2_036, physOcc: 95, econOcc: 86.5 },
+  11: { gpr: 109_000, netRental: 95_462, badDebt: 1_537, physOcc: 95, econOcc: 87.6 },
+  12: { gpr: 109_000, netRental: 96_037, badDebt: 1_545, physOcc: 95, econOcc: 88.1 },
+};
+
 // ─── CACHE ───────────────────────────────────────────────────────────────────
 const CACHE_KEY    = "te-metrics-cache-v1";
 const CACHE_TS_KEY = "te-metrics-cache-ts-v1";
@@ -220,6 +237,32 @@ function StatCard({ label, value, sub, color = "text-gray-900" }: { label: strin
   );
 }
 
+function BudgetCard({
+  label, actual, budget, formatVal, higherIsBetter = true, sub,
+}: {
+  label: string; actual: number; budget: number;
+  formatVal: (n: number) => string; higherIsBetter?: boolean; sub?: string;
+}) {
+  const diff = actual - budget;
+  const isGood = higherIsBetter ? diff >= 0 : diff <= 0;
+  const diffColor  = isGood ? "text-emerald-600" : "text-red-600";
+  const valueColor = isGood ? "text-emerald-600" : "text-amber-600";
+  const diffLabel  = (diff >= 0 ? "+" : "") + formatVal(diff);
+  return (
+    <Card className="border-gray-200">
+      <CardContent className="pt-4 pb-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+        <p className={cn("text-2xl font-bold mt-1", valueColor)}>{formatVal(actual)}</p>
+        <div className="flex items-center justify-between mt-1.5">
+          <p className="text-xs text-gray-400">Budget: {formatVal(budget)}</p>
+          <p className={cn("text-xs font-bold", diffColor)}>{diffLabel}</p>
+        </div>
+        {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TowneEastPage() {
   const [month] = useState<Month>("mar");
@@ -283,6 +326,8 @@ export default function TowneEastPage() {
   const scrollTo = useCallback((id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
+
+  const budget = TE_BUDGET[new Date().getMonth() + 1] ?? TE_BUDGET[4];
 
   const income    = INCOME[month];
   const expenses  = EXPENSES[month];
@@ -371,30 +416,35 @@ export default function TowneEastPage() {
           ) : metrics ? (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-                <StatCard
+                <BudgetCard
                   label="Occupancy"
-                  value={fmtPct(metrics.physicalOccupancyPct)}
+                  actual={metrics.physicalOccupancyPct}
+                  budget={budget.physOcc}
+                  formatVal={fmtPct}
                   sub={`${metrics.occupiedCount + metrics.occupiedNTVCount} / 100 units`}
-                  color={metrics.physicalOccupancyPct >= 95 ? "text-emerald-600" : "text-amber-600"}
                 />
-                <StatCard
-                  label="Total Charged"
-                  value={fmt(metrics.totalCharged)}
-                  sub="Current month lease charges"
+                <BudgetCard
+                  label="Collected MTD"
+                  actual={metrics.totalCollected}
+                  budget={budget.netRental}
+                  formatVal={fmt}
+                  sub={`GPR: ${fmt(budget.gpr)}`}
                 />
-                <StatCard
-                  label="Collected"
-                  value={fmt(metrics.totalCollected)}
-                  sub={`${fmtPct(metrics.collectionRatePct)} of charged`}
-                  color="text-emerald-600"
+                <BudgetCard
+                  label="Economic Occupancy"
+                  actual={metrics.economicOccupancyPct}
+                  budget={budget.econOcc}
+                  formatVal={fmtPct}
+                  sub={`${fmt(metrics.totalLeaseRent)} lease rent / ${fmt(metrics.gpr)} GPR`}
                 />
-                <Card className="border-red-100 bg-red-50/30">
-                  <CardContent className="pt-4 pb-3">
-                    <p className="text-xs font-semibold text-red-500 uppercase tracking-wide">Delinquent Balance</p>
-                    <p className="text-2xl font-bold mt-1 text-red-600">{fmt(metrics.delinquentBalance)}</p>
-                    <p className="text-xs text-red-400 mt-1">{metrics.delinquentCount} unit{metrics.delinquentCount !== 1 ? "s" : ""} past due</p>
-                  </CardContent>
-                </Card>
+                <BudgetCard
+                  label="Delinquent Balance"
+                  actual={metrics.delinquentBalance}
+                  budget={budget.badDebt}
+                  formatVal={fmt}
+                  higherIsBetter={false}
+                  sub={`${metrics.delinquentCount} unit${metrics.delinquentCount !== 1 ? "s" : ""} past due`}
+                />
               </div>
 
               <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
