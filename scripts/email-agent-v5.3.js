@@ -328,9 +328,23 @@ function isTowneEastMMRBundle(attachments) {
 
 var TE_METRICS_PROMPT =
   'You are extracting Towne East Village (100-unit, Converse TX) dashboard metrics from the attached reports.\n\n' +
-  'Sources may include: MMR Excel (occupancy, collections), Delinquent and Prepaid PDF (delinquency),\n' +
-  'Leasing Activity PDF (prospects/visits/leases), Resident Activity PDF (move-ins/outs/NTVs/renewals).\n\n' +
+  'Sources may include: MMR Excel (occupancy, collections), Rent Roll CSV (unit status, lease rent, market rent),\n' +
+  'Availability CSV (vacant unit details), Resident Balances CSV (payments/collections), \n' +
+  'Delinquent and Prepaid PDF (delinquency), Leasing Activity PDF (prospects/leases),\n' +
+  'Resident Activity PDF (move-ins/outs/NTVs/renewals).\n\n' +
   'Return ONLY the JSON below (no markdown). Use 0 or "" for any field not found.\n\n' +
+  'OCCUPANCY RULES (from Rent Roll):\n' +
+  '- occupiedCount = rows where status = "Occupied" (not NTV)\n' +
+  '- occupiedNTVCount = rows where status = "Occupied - NTV" or "Notice to Vacate"\n' +
+  '- vacantCount = rows where status = "Vacant"\n' +
+  '- physicalOccupancyPct = (occupiedCount + occupiedNTVCount) / 100 * 100\n' +
+  '- gpr = SUM of market rent for ALL 100 units (including vacant)\n' +
+  '- totalLeaseRent = SUM of lease/contract rent for Occupied + NTV units only\n' +
+  '- economicOccupancyPct = totalLeaseRent / gpr * 100\n\n' +
+  'COLLECTIONS RULES (from Resident Balances or MMR):\n' +
+  '- totalCharged = sum of "Lease Charges" or "Current Charges" column for current residents\n' +
+  '- totalCollected = sum of "Total Credits" or "Payments Received" or "Cash Receipts" column — this is actual money collected this period\n' +
+  '- collectionRatePct = totalCollected / totalCharged * 100\n\n' +
   'DELINQUENCY RULES:\n' +
   '- delinquentBalance = "Net Delinquent" from the grand totals row\n' +
   '- priorPeriodBalance = "Beginning Balance" grand total\n' +
