@@ -169,6 +169,7 @@ export async function POST(req: NextRequest) {
   let delinquencyText: string | null = null;
   let maintenanceText: string | null = null;
   let leasingBuf:      Buffer | null = null;
+  let renovationData:  unknown       = null;
 
   try {
     const contentType = (req.headers.get("content-type") || "").toLowerCase();
@@ -180,6 +181,8 @@ export async function POST(req: NextRequest) {
         maintenanceText = Buffer.from(json.maintenance.base64, "base64").toString("utf-8");
       if (isJsonFile(json.leasing))
         leasingBuf = Buffer.from(json.leasing.base64, "base64");
+      if (json.renovation && typeof json.renovation === "object")
+        renovationData = json.renovation;
     } else {
       const form = await req.formData();
       const d = form.get("delinquency");
@@ -196,8 +199,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!delinquencyText && !maintenanceText && !leasingBuf) {
-    return NextResponse.json({ error: "At least one of delinquency, maintenance, or leasing is required." }, { status: 400 });
+  if (!delinquencyText && !maintenanceText && !leasingBuf && !renovationData) {
+    return NextResponse.json({ error: "At least one of delinquency, maintenance, leasing, or renovation is required." }, { status: 400 });
   }
 
   try {
@@ -222,6 +225,7 @@ export async function POST(req: NextRequest) {
     if (delinquencyText) extras.delinquency = parseDelinquency(delinquencyText);
     if (maintenanceText) extras.maintenance  = parseMaintenance(maintenanceText);
     if (leasingBuf)      extras.leasing      = parseLeasing(leasingBuf);
+    if (renovationData)  extras.renovation   = renovationData;
 
     const uploadedAt = new Date().toISOString();
     await putAdaptive(EXTRAS_PATH, Buffer.from(JSON.stringify({ uploadedAt, extras })), "application/json");
