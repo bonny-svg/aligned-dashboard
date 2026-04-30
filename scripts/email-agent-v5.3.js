@@ -726,12 +726,14 @@ function checkNewEmails() {
         }
 
         // ── Towne East fast-path ─────────────────────────────
-        // A single email may contain both the OneSite bundle AND the extras
-        // reports (or just one). We attempt both and log each result.
-        if (propId === 'towne-east') {
+        // Detection is attachment-driven — subject line / sender are unreliable.
+        // isTowneEastMMRBundle inspects filenames and content types directly.
+        // Run whenever propId matches OR whenever the attachment bundle looks like TE.
+        const teMMRCheck = isTowneEastMMRBundle(attList);
+        if (propId === 'towne-east' || teMMRCheck) {
           const teOneSite = isTowneEastOneSiteBundle(attList);
           const teExtras  = isTowneEastExtrasBundle(attList);
-          const teMMR     = isTowneEastMMRBundle(attList); // always check, even if XLS present
+          const teMMR     = teMMRCheck;
 
           if (teOneSite || teExtras || teMMR) {
             Logger.log('[TOWNE EAST AUTO-SYNC] ' + subject);
