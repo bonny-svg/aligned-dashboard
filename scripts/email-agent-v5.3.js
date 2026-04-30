@@ -380,9 +380,9 @@ var TE_METRICS_PROMPT =
   '1. Monthly Transaction Summary PDF (highest priority if present):\n' +
   '   - gpr = "Gross Market Rent*" line in the MONTHLY RENTAL POTENTIAL COMPUTATION section (e.g. 106,100)\n' +
   '   - totalCollected = "Current Monthly Rental Collections" or "Total Monthly Collections" (bottom of page, e.g. 82,295.66)\n' +
-  '   - delinquentBalance = "Past Due End of Current Month" under PAST DUES/PREPAIDS section (e.g. 36,927.45)\n' +
-  '   - priorPeriodBalance = "Past Due End of Prior Month" under PAST DUES/PREPAIDS section (e.g. 21,591.46)\n' +
   '   - totalCharged = "Total Possible Monthly Collections" line (e.g. 120,079.90)\n' +
+  '   NOTE: Do NOT pull delinquentBalance or priorPeriodBalance from this PDF — those totals include\n' +
+  '   prior-period carryover balances (DelBegBal). Use the Delinquent & Prepaid XLS for delinquency.\n' +
   '2. Resident Balances CSV (fallback if no Transaction Summary):\n' +
   '   - totalCharged = sum of "Lease Charges" for current residents only\n' +
   '   - totalCollected = sum of "Total Credits" or "Payments Received" for current residents only\n' +
@@ -399,12 +399,26 @@ var TE_METRICS_PROMPT =
   '  expiring = units with leaseEnd in that month; ntv = NTV units expiring that month; mtm = current month MTM count only\n' +
   '- moveOutsThisMonth = NTV units whose leaseEnd falls in the current calendar month\n' +
   '- leaseStartsThisMonth = units whose leaseStart falls in the current calendar month\n\n' +
-  'DELINQUENCY RULES:\n' +
-  '- delinquentBalance / priorPeriodBalance: use Monthly Transaction Summary if present (see COLLECTIONS RULES above)\n' +
-  '- If falling back to Resident Balances CSV: ONLY include CURRENT residents — exclude Status = "Former", "Past", "Previous", "Evicted"\n' +
-  '- newDelinquencyThisPeriod = delinquentBalance - priorPeriodBalance\n' +
-  '- delinquentCount = number of current residents with a positive delinquent balance\n' +
-  '- topDelinquents = top 5 CURRENT residents by net delinquent balance (from Delinquent & Prepaid PDF or Resident Balances, positive amounts only, include unit number)\n\n' +
+  'DELINQUENCY RULES — CURRENT MONTH COLLECTIBLE ONLY:\n' +
+  'Use the Delinquent and Prepaid XLS (CSV) as the authoritative source for ALL delinquency fields.\n' +
+  'The goal is to capture only what is actually collectible THIS month — not accumulated prior balances.\n\n' +
+  'Step 1 — Exclude ineligible residents:\n' +
+  '  Skip any resident whose Status contains "Former", "Past", "Previous", "Evicted", "Skip", or "Move-Out".\n' +
+  '  Only include Status = "Current" residents.\n\n' +
+  'Step 2 — Exclude prior-period carryover rows:\n' +
+  '  Within each current resident\'s ledger, IGNORE any row where the charge type is "DelBegBal"\n' +
+  '  (Delinquent Beginning Balance). These are amounts carried forward from prior months and are\n' +
+  '  NOT collectible this month — do not add them to any total.\n\n' +
+  'Step 3 — Calculate each current resident\'s net current-period balance:\n' +
+  '  net = SUM(current charges: RENT, LATEFEE, ADMIN, UTIL, etc. — but NOT DelBegBal)\n' +
+  '      - SUM(payments/credits: PMTOPIRD, PMTOPACH, PMTETF, MISC CREDIT, PREPAID, etc.)\n' +
+  '  A positive net means the resident owes money this month.\n\n' +
+  'Step 4 — Aggregate:\n' +
+  '  - delinquentBalance = SUM of net for current residents where net > 0\n' +
+  '  - delinquentCount = count of current residents where net > 0\n' +
+  '  - priorPeriodBalance = 0 (we exclude prior-period rows, so there is no prior-period figure)\n' +
+  '  - newDelinquencyThisPeriod = delinquentBalance\n' +
+  '  - topDelinquents = top 8 current residents by net descending (unit, name, amount)\n\n' +
   '{"asOf":"YYYY-MM-DD","unitCount":100,"occupiedCount":0,"occupiedNTVCount":0,"vacantCount":0,' +
   '"physicalOccupancyPct":0,"leasedOccupancyPct":0,"gpr":0,"totalLeaseRent":0,"economicOccupancyPct":0,' +
   '"totalCharged":0,"totalCollected":0,"collectionRatePct":0,' +
@@ -447,7 +461,10 @@ function uploadTowneEastFromMMR(bundle) {
   // Delinquent & Prepaid XLS → CSV (per-unit detail for topDelinquents)
   if (bundle.delinquencyXls) {
     var delCsv = xlsxToCsv(attachmentBase64(bundle.delinquencyXls), bundle.delinquencyXls.getContentType(), bundle.delinquencyXls.getName());
-    if (delCsv) msg.push({ type: 'text', text: 'DELINQUENT AND PREPAID (CSV — use for topDelinquents list, current residents only):\n' + delCsv });
+    if (delCsv) msg.push({ type: 'text', text: 'DELINQUENT AND PREPAID (CSV — PRIMARY source for all delinquency fields):\n' +
+      'RULES: (1) Skip Former/Past/Evicted/Skip residents. (2) Skip any row where charge type = "DelBegBal" — those are prior-period carryovers. ' +
+      '(3) For each current resident, net = current charges (RENT/LATEFEE/ADMIN/etc.) minus payments. ' +
+      '(4) delinquentBalance = sum of positive nets. See DELINQUENCY RULES for full details.\n' + delCsv });
     Utilities.sleep(1000);
   }
   // Delinquent & Prepaid PDF fallback
