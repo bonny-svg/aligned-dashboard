@@ -379,68 +379,61 @@ function isTowneEastMMRBundle(attachments) {
 
 var TE_METRICS_PROMPT =
   'You are extracting Towne East Village (100-unit, Converse TX) dashboard metrics from the attached reports.\n\n' +
-  'Sources may include: MMR Excel (occupancy, collections), Rent Roll CSV (unit status, lease rent, market rent),\n' +
-  'Availability CSV (vacant unit details), Resident Balances CSV (payments/collections),\n' +
-  'Delinquent and Prepaid PDF (delinquency), Leasing Activity PDF (prospects/leases),\n' +
-  'Resident Activity PDF (move-ins/outs/NTVs/renewals).\n\n' +
+  'Sources may include: Rent Roll XLS/CSV, Delinquent & Prepaid XLS/CSV, Monthly Transaction Summary PDF, MMR Excel.\n' +
   'Return ONLY the JSON below (no markdown). Use 0 or "" for any field not found.\n\n' +
-  'OCCUPANCY RULES (from Rent Roll):\n' +
-  '- occupiedCount = rows where status = "Occupied" (not NTV)\n' +
-  '- occupiedNTVCount = rows where status = "Occupied - NTV" or "Notice to Vacate"\n' +
-  '- vacantCount = rows where status = "Vacant"\n' +
+
+  'OCCUPANCY RULES — from the Rent Roll (Unit/Lease Status column):\n' +
+  '- The status column contains exact values: "Occupied", "Occupied-NTV", "Vacant", "Former resident"\n' +
+  '- occupiedCount = count of rows where Unit/Lease Status = exactly "Occupied"\n' +
+  '- occupiedNTVCount = count of rows where Unit/Lease Status = exactly "Occupied-NTV"\n' +
+  '- vacantCount = count of rows where Unit/Lease Status = exactly "Vacant"\n' +
+  '- Ignore "Former resident" rows for all counts\n' +
   '- physicalOccupancyPct = (occupiedCount + occupiedNTVCount) / 100 * 100\n' +
-  '- gpr = SUM of market rent for ALL 100 units (including vacant)\n' +
-  '- totalLeaseRent = SUM of lease/contract rent for Occupied + NTV units only\n' +
+  '- leasedOccupancyPct = physicalOccupancyPct (no Vacant-Leased units at this property)\n' +
+  '- gpr = SUM of "Market + Addl." column for Occupied + Occupied-NTV + Vacant rows (not Former)\n' +
+  '- totalLeaseRent = SUM of "Lease Rent" column for Occupied + Occupied-NTV rows only\n' +
   '- economicOccupancyPct = totalLeaseRent / gpr * 100\n\n' +
-  'COLLECTIONS RULES — priority order:\n' +
-  '1. Monthly Transaction Summary PDF (highest priority if present):\n' +
-  '   - gpr = "Gross Market Rent*" line in the MONTHLY RENTAL POTENTIAL COMPUTATION section (e.g. 106,100)\n' +
-  '   - totalCollected = "Current Monthly Rental Collections" or "Total Monthly Collections" (bottom of page, e.g. 82,295.66)\n' +
-  '   - totalCharged = "Total Possible Monthly Collections" line (e.g. 120,079.90)\n' +
-  '   NOTE: Do NOT pull delinquentBalance or priorPeriodBalance from this PDF — those totals include\n' +
-  '   prior-period carryover balances (DelBegBal). Use the Delinquent & Prepaid XLS for delinquency.\n' +
-  '2. Resident Balances CSV (fallback if no Transaction Summary):\n' +
-  '   - totalCharged = sum of "Lease Charges" for current residents only\n' +
-  '   - totalCollected = sum of "Total Credits" or "Payments Received" for current residents only\n' +
-  '- collectionRatePct = totalCollected / totalCharged * 100\n\n'
-  'LEASING RULES (from Rent Roll — use TODAY\'S DATE for all date math):\n' +
-  '- expiring30d = count of Occupied/NTV units where leaseEnd is between today and today+30 days\n' +
-  '- expiring60d = count where leaseEnd is between today and today+60 days\n' +
-  '- expiring90d = count where leaseEnd is between today and today+90 days\n' +
-  '- monthToMonthCount = count of Occupied/NTV units where leaseEnd is BEFORE today (expired, no renewal)\n' +
-  '- signedLeasesMTD = count of units where leaseStart falls in the CURRENT calendar month and year\n' +
-  '- moveOutsNTVCount = same as occupiedNTVCount\n' +
-  '- leaseExpirationByMonth = array of 6 objects for the next 6 calendar months (starting this month):\n' +
-  '  each object: { "month": "Mon YYYY", "expiring": N, "ntv": N, "mtm": N }\n' +
-  '  expiring = units with leaseEnd in that month; ntv = NTV units expiring that month; mtm = current month MTM count only\n' +
-  '- moveOutsThisMonth = NTV units whose leaseEnd falls in the current calendar month\n' +
-  '- leaseStartsThisMonth = units whose leaseStart falls in the current calendar month\n\n' +
-  'DELINQUENCY RULES — CURRENT MONTH "CURRENT" AGING BUCKET ONLY:\n' +
-  'Use the Delinquent and Prepaid XLS (CSV) as the authoritative source for ALL delinquency fields.\n' +
-  'The goal is ONLY the unpaid charges from the CURRENT calendar month — NOT 30-day, 60-day, or 90-day aged balances.\n\n' +
-  'The XLS has an aging summary section with columns: Current | 30 Days | 60 Days | 90+ Days.\n' +
-  'We ONLY want the "Current" column (this month\'s charges) — the other aging buckets are prior-month debt.\n\n' +
-  'Step 1 — Exclude ineligible residents:\n' +
-  '  Skip any resident whose Status contains "Former", "Past", "Previous", "Evicted", "Skip", or "Move-Out".\n' +
-  '  Only include Status = "Current" (active) residents.\n\n' +
-  'Step 2 — Identify the correct charges:\n' +
-  '  Method A (preferred — if the XLS has per-resident aging columns):\n' +
-  '    For each current resident, use ONLY their "Current" aging column amount (not 30/60/90 columns).\n' +
-  '  Method B (fallback — if using raw charge rows):\n' +
-  '    Include ONLY charge rows where the transaction date falls in the CURRENT calendar month.\n' +
-  '    Exclude: DelBegBal, any row dated in a prior month, any row with an aging bucket label of 30/60/90+.\n\n' +
-  'Step 3 — Subtract current-month payments:\n' +
-  '  From each resident\'s current-month charges, subtract any payments received this month\n' +
-  '  (PMTOPIRD, PMTOPACH, PMTETF, MISC CREDIT, PREPAID, etc.).\n' +
-  '  net_current = current_month_charges - current_month_payments\n\n' +
-  'Step 4 — Aggregate (for current residents where net_current > 0):\n' +
-  '  - delinquentBalance = SUM of net_current (CURRENT aging bucket only — expected to be roughly $2,000–$5,000 range, NOT $13K+)\n' +
-  '  - delinquentCount = count of current residents where net_current > 0\n' +
-  '  - priorPeriodBalance = SUM of the "30 Days" aging column for current residents (March aged debt, for reference)\n' +
+
+  'LEASING RULES — from Rent Roll, dates are in MM/DD/YYYY text format, TODAY = ' + '{{TODAY}}' + ':\n' +
+  '- signedLeasesMTD = count of Occupied/Occupied-NTV rows where Lease Start month+year = current month\n' +
+  '- moveOutsNTVCount = occupiedNTVCount\n' +
+  '- expiring30d = count of Occupied/NTV rows where Lease End is between today and today+30 days (inclusive)\n' +
+  '- expiring60d = count where Lease End is between today and today+60 days\n' +
+  '- expiring90d = count where Lease End is between today and today+90 days\n' +
+  '- monthToMonthCount = count of Occupied/NTV rows where Lease End is BEFORE today\n' +
+  '- moveOutsThisMonth = array of NTV units whose Lease End falls in the CURRENT calendar month\n' +
+  '  format: [{"unit":"421","residentName":"Wright, Jerrell","moveOutDate":"2026-05-31"}]\n' +
+  '- leaseStartsThisMonth = array of Occupied/NTV units whose Lease Start is in the current month\n' +
+  '  format: [{"unit":"115","residentName":"Sierra De Nieto, Monica","leaseStart":"2026-04-01"}]\n' +
+  '- leaseExpirationByMonth = array of 6 objects for next 6 calendar months starting this month:\n' +
+  '  [{"month":"Apr 2026","expiring":N,"ntv":N,"mtm":N}, ...]\n' +
+  '  expiring = all Occupied/NTV with leaseEnd in that month, ntv = NTV subset, mtm = monthToMonthCount (current month only, else 0)\n\n' +
+
+  'COLLECTIONS RULES — from Monthly Transaction Summary PDF (highest priority):\n' +
+  '- gpr = "Gross Market Rent*" in MONTHLY RENTAL POTENTIAL COMPUTATION section\n' +
+  '- totalCollected = "Current Monthly Rental Collections" (bottom summary, e.g. 82,295.66)\n' +
+  '- totalCharged = "Total Possible Monthly Collections" (e.g. 120,079.90)\n' +
+  '- collectionRatePct = totalCollected / totalCharged * 100\n' +
+  '- Do NOT use MTSR for delinquentBalance — see DELINQUENCY RULES below\n\n' +
+
+  'DELINQUENCY RULES — from Delinquent & Prepaid XLS (two sheets when converted to CSV):\n\n' +
+  'The XLS has TWO sheets:\n' +
+  '  Sheet1 = per-charge detail rows. Has a TOTALS row at the bottom.\n' +
+  '  Sheet2 = per-resident summary rows (one row per resident, already aggregated).\n\n' +
+  'Step 1 — Get delinquentBalance and priorPeriodBalance from the TOTALS row in Sheet1:\n' +
+  '  Find the row labeled "TOTALS" (or the last data row with comma-separated numeric totals).\n' +
+  '  The columns are: ..., Net Balance, Current, 30 Days, 60 Days, 90+ Days, ...\n' +
+  '  - delinquentBalance = the "Current" column value in the TOTALS row (e.g. 2535.50)\n' +
+  '  - priorPeriodBalance = the "30 Days" column value in the TOTALS row (e.g. 9674.35)\n' +
   '  - newDelinquencyThisPeriod = delinquentBalance\n' +
-  '  - topDelinquents = top 8 current residents by net_current descending (unit, name, amount — current month only)\n\n' +
-  'IMPORTANT: If you compute a delinquentBalance above $10,000, you have almost certainly included 30/60-day aged\n' +
-  'balances. Go back and use ONLY the "Current" aging column. The correct April figure is approximately $2,500.\n\n' +
+  '  Do NOT sum per-resident rows — use the TOTALS row directly.\n\n' +
+  'Step 2 — Get topDelinquents and delinquentCount from Sheet2 (per-resident summary):\n' +
+  '  Sheet2 columns: Resh ID, Lease ID, Bldg/Unit, Name, Phone, Email, Status, Move-In/Out,\n' +
+  '    Total Prepaid, Total Delinquent, D, O, Net Balance, Current, 30 Days, 60 Days, 90+ Days, ...\n' +
+  '  Filter to rows where Status = "Current resident" OR "NTV" AND Net Balance > 0.\n' +
+  '  Sort by Net Balance descending. Take top 8 for topDelinquents.\n' +
+  '  - topDelinquents format: [{"unit":"825","name":"Martin, Jessica","amount":2801.00}]\n' +
+  '  - delinquentCount = count of qualifying rows (current/NTV with Net Balance > 0)\n\n' +
   '{"asOf":"YYYY-MM-DD","unitCount":100,"occupiedCount":0,"occupiedNTVCount":0,"vacantCount":0,' +
   '"physicalOccupancyPct":0,"leasedOccupancyPct":0,"gpr":0,"totalLeaseRent":0,"economicOccupancyPct":0,' +
   '"totalCharged":0,"totalCollected":0,"collectionRatePct":0,' +
@@ -454,7 +447,7 @@ var TE_METRICS_PROMPT =
 
 function tePromptWithDate() {
   var today = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd');
-  return 'TODAY\'S DATE: ' + today + '\n\n' + TE_METRICS_PROMPT;
+  return TE_METRICS_PROMPT.replace('{{TODAY}}', today);
 }
 
 function uploadTowneEastFromMMR(bundle) {
@@ -475,7 +468,7 @@ function uploadTowneEastFromMMR(bundle) {
   // Monthly Transaction Summary PDF — primary source for collections & delinquency
   if (bundle.transactionSummary) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.transactionSummary) } });
-    msg.push({ type: 'text', text: 'Above: Monthly Transaction Summary (authoritative source — use this for totalCollected, delinquentBalance, priorPeriodBalance, gpr)' });
+    msg.push({ type: 'text', text: 'Above: Monthly Transaction Summary — use for totalCollected, totalCharged, gpr. Do NOT use for delinquentBalance (use Delinquent & Prepaid XLS TOTALS row instead).' });
   }
   // Monthly Income Summary / Cash G/L XLS → CSV
   if (bundle.monthlyIncomeSummary) {
@@ -490,9 +483,10 @@ function uploadTowneEastFromMMR(bundle) {
   if (bundle.delinquencyXls) {
     var delCsv = xlsxToCsv(attachmentBase64(bundle.delinquencyXls), bundle.delinquencyXls.getContentType(), bundle.delinquencyXls.getName());
     if (delCsv) msg.push({ type: 'text', text: 'DELINQUENT AND PREPAID (CSV — PRIMARY source for all delinquency fields):\n' +
-      'RULES: (1) Skip Former/Past/Evicted/Skip residents. (2) Skip any row where charge type = "DelBegBal" — those are prior-period carryovers. ' +
-      '(3) For each current resident, net = current charges (RENT/LATEFEE/ADMIN/etc.) minus payments. ' +
-      '(4) delinquentBalance = sum of positive nets. See DELINQUENCY RULES for full details.\n' + delCsv });
+      'This file has TWO sheets: Sheet1 = per-charge detail rows (find TOTALS row at bottom for aggregate numbers); ' +
+      'Sheet2 = per-resident summary (one row per resident with Net Balance and aging columns already aggregated).\n' +
+      'Use TOTALS row "Current" column for delinquentBalance. Use Sheet2 for topDelinquents and delinquentCount.\n' +
+      'See DELINQUENCY RULES for full details.\n' + delCsv });
     Utilities.sleep(1000);
   }
   // Delinquent & Prepaid PDF fallback
