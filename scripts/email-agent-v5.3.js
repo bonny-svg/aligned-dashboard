@@ -302,46 +302,63 @@ function uploadTowneEastExtras(bundle) {
 // which is POSTed to /api/towne-east/metrics.
 function isTowneEastMMRBundle(attachments) {
   const found = {
-    mmr: null, delinquency: null, leasingActivity: null, residentActivity: null,
-    transactionSummary: null,  // Monthly Transaction Summary PDF (authoritative collections/delinquency)
+    mmr: null, delinquency: null, delinquencyXls: null,
+    leasingActivity: null, residentActivity: null,
+    transactionSummary: null,   // Monthly Transaction Summary PDF (authoritative collections/delinquency)
     monthlyIncomeSummary: null, // Monthly Income Summary XLS
     cashGLDistribution: null,   // Cash Basis G/L Distribution XLS
+    unmatchedPdfs: [],          // Catch-all for PDFs with UUID/unknown names
   };
   attachments.forEach(function(att) {
     const raw  = att.getName().toLowerCase();
     const name = raw.replace(/[_+\-\s]+/g, ' ');
     const mime = att.getContentType() || '';
-    if (!found.mmr && (raw.endsWith('.xlsx') || raw.endsWith('.xls')) &&
+    const isXls = raw.endsWith('.xlsx') || raw.endsWith('.xls');
+    const isPdf = mime.includes('pdf') || raw.endsWith('.pdf');
+
+    if (!found.mmr && isXls &&
         (name.includes('mmr') || name.includes('monthly management') || name.includes('weekly agenda') || name.includes('te mmr'))) {
       found.mmr = att; return;
     }
-    if (!found.monthlyIncomeSummary && (raw.endsWith('.xlsx') || raw.endsWith('.xls')) &&
+    if (!found.monthlyIncomeSummary && isXls &&
         (name.includes('monthly income') || name.includes('income summary'))) {
       found.monthlyIncomeSummary = att; return;
     }
-    if (!found.cashGLDistribution && (raw.endsWith('.xlsx') || raw.endsWith('.xls')) &&
+    if (!found.cashGLDistribution && isXls &&
         (name.includes('cash basis') || name.includes('gl distribution') || name.includes('g l distribution') || name.includes('cash gl'))) {
       found.cashGLDistribution = att; return;
     }
-    if (!found.transactionSummary && mime.includes('pdf') &&
+    // Delinquent & Prepaid — XLS version (e.g. "Delinquent and Prepaid - Excel.xls")
+    if (!found.delinquencyXls && isXls &&
+        (name.includes('delinquent') || name.includes('delinquency') || name.includes('prepaid'))) {
+      found.delinquencyXls = att; return;
+    }
+    if (!found.transactionSummary && isPdf &&
         (name.includes('transaction summary') || name.includes('monthly transaction') ||
          name.includes('transaction summ') || name.includes('income summary'))) {
       found.transactionSummary = att; return;
     }
-    if (!found.delinquency && mime.includes('pdf') &&
+    if (!found.delinquency && isPdf &&
         (name.includes('delinquent') || name.includes('delinquency') || name.includes('prepaid'))) {
       found.delinquency = att; return;
     }
-    if (!found.leasingActivity && mime.includes('pdf') &&
+    if (!found.leasingActivity && isPdf &&
         (name.includes('leasing activ') || name.includes('leasing activity'))) {
       found.leasingActivity = att; return;
     }
-    if (!found.residentActivity && mime.includes('pdf') &&
+    if (!found.residentActivity && isPdf &&
         (name.includes('resident activ') || name.includes('resident activity'))) {
       found.residentActivity = att; return;
     }
+    // Catch-all: any remaining PDF (UUID names, etc.) — likely Monthly Transaction Summary
+    if (isPdf) { found.unmatchedPdfs.push(att); }
   });
-  return (found.mmr || found.delinquency || found.transactionSummary || found.monthlyIncomeSummary) ? found : null;
+  // Assign first unmatched PDF as transactionSummary if we didn't find one by name
+  if (!found.transactionSummary && found.unmatchedPdfs.length > 0) {
+    found.transactionSummary = found.unmatchedPdfs[0];
+  }
+  return (found.mmr || found.delinquency || found.delinquencyXls ||
+          found.transactionSummary || found.monthlyIncomeSummary) ? found : null;
 }
 
 var TE_METRICS_PROMPT =
@@ -427,7 +444,13 @@ function uploadTowneEastFromMMR(bundle) {
     const csv = xlsxToCsv(attachmentBase64(bundle.cashGLDistribution), bundle.cashGLDistribution.getContentType(), bundle.cashGLDistribution.getName());
     if (csv) msg.push({ type: 'text', text: 'CASH BASIS G/L DISTRIBUTION (CSV):\n' + csv });
   }
-  // Other PDFs
+  // Delinquent & Prepaid XLS → CSV (per-unit detail for topDelinquents)
+  if (bundle.delinquencyXls) {
+    var delCsv = xlsxToCsv(attachmentBase64(bundle.delinquencyXls), bundle.delinquencyXls.getContentType(), bundle.delinquencyXls.getName());
+    if (delCsv) msg.push({ type: 'text', text: 'DELINQUENT AND PREPAID (CSV — use for topDelinquents list, current residents only):\n' + delCsv });
+    Utilities.sleep(1000);
+  }
+  // Delinquent & Prepaid PDF fallback
   if (bundle.delinquency) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.delinquency) } });
     msg.push({ type: 'text', text: 'Above: Delinquent and Prepaid report (use for topDelinquents unit-level list; use Monthly Transaction Summary totals for delinquentBalance)' });
