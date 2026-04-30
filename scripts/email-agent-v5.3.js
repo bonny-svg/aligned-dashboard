@@ -399,26 +399,32 @@ var TE_METRICS_PROMPT =
   '  expiring = units with leaseEnd in that month; ntv = NTV units expiring that month; mtm = current month MTM count only\n' +
   '- moveOutsThisMonth = NTV units whose leaseEnd falls in the current calendar month\n' +
   '- leaseStartsThisMonth = units whose leaseStart falls in the current calendar month\n\n' +
-  'DELINQUENCY RULES — CURRENT MONTH COLLECTIBLE ONLY:\n' +
+  'DELINQUENCY RULES — CURRENT MONTH "CURRENT" AGING BUCKET ONLY:\n' +
   'Use the Delinquent and Prepaid XLS (CSV) as the authoritative source for ALL delinquency fields.\n' +
-  'The goal is to capture only what is actually collectible THIS month — not accumulated prior balances.\n\n' +
+  'The goal is ONLY the unpaid charges from the CURRENT calendar month — NOT 30-day, 60-day, or 90-day aged balances.\n\n' +
+  'The XLS has an aging summary section with columns: Current | 30 Days | 60 Days | 90+ Days.\n' +
+  'We ONLY want the "Current" column (this month\'s charges) — the other aging buckets are prior-month debt.\n\n' +
   'Step 1 — Exclude ineligible residents:\n' +
   '  Skip any resident whose Status contains "Former", "Past", "Previous", "Evicted", "Skip", or "Move-Out".\n' +
-  '  Only include Status = "Current" residents.\n\n' +
-  'Step 2 — Exclude prior-period carryover rows:\n' +
-  '  Within each current resident\'s ledger, IGNORE any row where the charge type is "DelBegBal"\n' +
-  '  (Delinquent Beginning Balance). These are amounts carried forward from prior months and are\n' +
-  '  NOT collectible this month — do not add them to any total.\n\n' +
-  'Step 3 — Calculate each current resident\'s net current-period balance:\n' +
-  '  net = SUM(current charges: RENT, LATEFEE, ADMIN, UTIL, etc. — but NOT DelBegBal)\n' +
-  '      - SUM(payments/credits: PMTOPIRD, PMTOPACH, PMTETF, MISC CREDIT, PREPAID, etc.)\n' +
-  '  A positive net means the resident owes money this month.\n\n' +
-  'Step 4 — Aggregate:\n' +
-  '  - delinquentBalance = SUM of net for current residents where net > 0\n' +
-  '  - delinquentCount = count of current residents where net > 0\n' +
-  '  - priorPeriodBalance = 0 (we exclude prior-period rows, so there is no prior-period figure)\n' +
+  '  Only include Status = "Current" (active) residents.\n\n' +
+  'Step 2 — Identify the correct charges:\n' +
+  '  Method A (preferred — if the XLS has per-resident aging columns):\n' +
+  '    For each current resident, use ONLY their "Current" aging column amount (not 30/60/90 columns).\n' +
+  '  Method B (fallback — if using raw charge rows):\n' +
+  '    Include ONLY charge rows where the transaction date falls in the CURRENT calendar month.\n' +
+  '    Exclude: DelBegBal, any row dated in a prior month, any row with an aging bucket label of 30/60/90+.\n\n' +
+  'Step 3 — Subtract current-month payments:\n' +
+  '  From each resident\'s current-month charges, subtract any payments received this month\n' +
+  '  (PMTOPIRD, PMTOPACH, PMTETF, MISC CREDIT, PREPAID, etc.).\n' +
+  '  net_current = current_month_charges - current_month_payments\n\n' +
+  'Step 4 — Aggregate (for current residents where net_current > 0):\n' +
+  '  - delinquentBalance = SUM of net_current (CURRENT aging bucket only — expected to be roughly $2,000–$5,000 range, NOT $13K+)\n' +
+  '  - delinquentCount = count of current residents where net_current > 0\n' +
+  '  - priorPeriodBalance = SUM of the "30 Days" aging column for current residents (March aged debt, for reference)\n' +
   '  - newDelinquencyThisPeriod = delinquentBalance\n' +
-  '  - topDelinquents = top 8 current residents by net descending (unit, name, amount)\n\n' +
+  '  - topDelinquents = top 8 current residents by net_current descending (unit, name, amount — current month only)\n\n' +
+  'IMPORTANT: If you compute a delinquentBalance above $10,000, you have almost certainly included 30/60-day aged\n' +
+  'balances. Go back and use ONLY the "Current" aging column. The correct April figure is approximately $2,500.\n\n' +
   '{"asOf":"YYYY-MM-DD","unitCount":100,"occupiedCount":0,"occupiedNTVCount":0,"vacantCount":0,' +
   '"physicalOccupancyPct":0,"leasedOccupancyPct":0,"gpr":0,"totalLeaseRent":0,"economicOccupancyPct":0,' +
   '"totalCharged":0,"totalCollected":0,"collectionRatePct":0,' +
