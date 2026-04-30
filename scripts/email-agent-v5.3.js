@@ -301,7 +301,12 @@ function uploadTowneEastExtras(bundle) {
 // Claude reads all of them and extracts TowneEastMetrics JSON
 // which is POSTed to /api/towne-east/metrics.
 function isTowneEastMMRBundle(attachments) {
-  const found = { mmr: null, delinquency: null, leasingActivity: null, residentActivity: null };
+  const found = {
+    mmr: null, delinquency: null, leasingActivity: null, residentActivity: null,
+    transactionSummary: null,  // Monthly Transaction Summary PDF (authoritative collections/delinquency)
+    monthlyIncomeSummary: null, // Monthly Income Summary XLS
+    cashGLDistribution: null,   // Cash Basis G/L Distribution XLS
+  };
   attachments.forEach(function(att) {
     const raw  = att.getName().toLowerCase();
     const name = raw.replace(/[_+\-\s]+/g, ' ');
@@ -309,6 +314,19 @@ function isTowneEastMMRBundle(attachments) {
     if (!found.mmr && (raw.endsWith('.xlsx') || raw.endsWith('.xls')) &&
         (name.includes('mmr') || name.includes('monthly management') || name.includes('weekly agenda') || name.includes('te mmr'))) {
       found.mmr = att; return;
+    }
+    if (!found.monthlyIncomeSummary && (raw.endsWith('.xlsx') || raw.endsWith('.xls')) &&
+        (name.includes('monthly income') || name.includes('income summary'))) {
+      found.monthlyIncomeSummary = att; return;
+    }
+    if (!found.cashGLDistribution && (raw.endsWith('.xlsx') || raw.endsWith('.xls')) &&
+        (name.includes('cash basis') || name.includes('gl distribution') || name.includes('g l distribution') || name.includes('cash gl'))) {
+      found.cashGLDistribution = att; return;
+    }
+    if (!found.transactionSummary && mime.includes('pdf') &&
+        (name.includes('transaction summary') || name.includes('monthly transaction') ||
+         name.includes('transaction summ') || name.includes('income summary'))) {
+      found.transactionSummary = att; return;
     }
     if (!found.delinquency && mime.includes('pdf') &&
         (name.includes('delinquent') || name.includes('delinquency') || name.includes('prepaid'))) {
@@ -323,7 +341,7 @@ function isTowneEastMMRBundle(attachments) {
       found.residentActivity = att; return;
     }
   });
-  return (found.mmr || found.delinquency) ? found : null;
+  return (found.mmr || found.delinquency || found.transactionSummary || found.monthlyIncomeSummary) ? found : null;
 }
 
 var TE_METRICS_PROMPT =
@@ -341,10 +359,17 @@ var TE_METRICS_PROMPT =
   '- gpr = SUM of market rent for ALL 100 units (including vacant)\n' +
   '- totalLeaseRent = SUM of lease/contract rent for Occupied + NTV units only\n' +
   '- economicOccupancyPct = totalLeaseRent / gpr * 100\n\n' +
-  'COLLECTIONS RULES (from Resident Balances or MMR):\n' +
-  '- totalCharged = sum of "Lease Charges" or "Current Charges" column for current residents\n' +
-  '- totalCollected = sum of "Total Credits" or "Payments Received" or "Cash Receipts" column — actual money received this period\n' +
-  '- collectionRatePct = totalCollected / totalCharged * 100\n\n' +
+  'COLLECTIONS RULES — priority order:\n' +
+  '1. Monthly Transaction Summary PDF (highest priority if present):\n' +
+  '   - gpr = "Gross Market Rent*" line in the MONTHLY RENTAL POTENTIAL COMPUTATION section (e.g. 106,100)\n' +
+  '   - totalCollected = "Current Monthly Rental Collections" or "Total Monthly Collections" (bottom of page, e.g. 82,295.66)\n' +
+  '   - delinquentBalance = "Past Due End of Current Month" under PAST DUES/PREPAIDS section (e.g. 36,927.45)\n' +
+  '   - priorPeriodBalance = "Past Due End of Prior Month" under PAST DUES/PREPAIDS section (e.g. 21,591.46)\n' +
+  '   - totalCharged = "Total Possible Monthly Collections" line (e.g. 120,079.90)\n' +
+  '2. Resident Balances CSV (fallback if no Transaction Summary):\n' +
+  '   - totalCharged = sum of "Lease Charges" for current residents only\n' +
+  '   - totalCollected = sum of "Total Credits" or "Payments Received" for current residents only\n' +
+  '- collectionRatePct = totalCollected / totalCharged * 100\n\n'
   'LEASING RULES (from Rent Roll — use TODAY\'S DATE for all date math):\n' +
   '- expiring30d = count of Occupied/NTV units where leaseEnd is between today and today+30 days\n' +
   '- expiring60d = count where leaseEnd is between today and today+60 days\n' +
@@ -358,12 +383,11 @@ var TE_METRICS_PROMPT =
   '- moveOutsThisMonth = NTV units whose leaseEnd falls in the current calendar month\n' +
   '- leaseStartsThisMonth = units whose leaseStart falls in the current calendar month\n\n' +
   'DELINQUENCY RULES:\n' +
-  '- ONLY include CURRENT residents — exclude any row whose Status column says "Former", "Past", "Previous", or "Evicted"\n' +
-  '- delinquentBalance = sum of "Net Delinquent" / "Ending Delinquent Balance" for current residents only\n' +
-  '- priorPeriodBalance = sum of "Beginning Balance" / "Beginning Delinquent" for current residents only\n' +
+  '- delinquentBalance / priorPeriodBalance: use Monthly Transaction Summary if present (see COLLECTIONS RULES above)\n' +
+  '- If falling back to Resident Balances CSV: ONLY include CURRENT residents — exclude Status = "Former", "Past", "Previous", "Evicted"\n' +
   '- newDelinquencyThisPeriod = delinquentBalance - priorPeriodBalance\n' +
   '- delinquentCount = number of current residents with a positive delinquent balance\n' +
-  '- topDelinquents = top 5 CURRENT residents by net delinquent balance (positive amounts only, include unit number)\n\n' +
+  '- topDelinquents = top 5 CURRENT residents by net delinquent balance (from Delinquent & Prepaid PDF or Resident Balances, positive amounts only, include unit number)\n\n' +
   '{"asOf":"YYYY-MM-DD","unitCount":100,"occupiedCount":0,"occupiedNTVCount":0,"vacantCount":0,' +
   '"physicalOccupancyPct":0,"leasedOccupancyPct":0,"gpr":0,"totalLeaseRent":0,"economicOccupancyPct":0,' +
   '"totalCharged":0,"totalCollected":0,"collectionRatePct":0,' +
@@ -389,10 +413,24 @@ function uploadTowneEastFromMMR(bundle) {
     const csv = xlsxToCsv(attachmentBase64(bundle.mmr), bundle.mmr.getContentType(), bundle.mmr.getName());
     if (csv) msg.push({ type: 'text', text: 'MMR EXCEL (CSV):\n' + csv });
   }
-  // PDFs sent as native documents
+  // Monthly Transaction Summary PDF — primary source for collections & delinquency
+  if (bundle.transactionSummary) {
+    msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.transactionSummary) } });
+    msg.push({ type: 'text', text: 'Above: Monthly Transaction Summary (authoritative source — use this for totalCollected, delinquentBalance, priorPeriodBalance, gpr)' });
+  }
+  // Monthly Income Summary / Cash G/L XLS → CSV
+  if (bundle.monthlyIncomeSummary) {
+    const csv = xlsxToCsv(attachmentBase64(bundle.monthlyIncomeSummary), bundle.monthlyIncomeSummary.getContentType(), bundle.monthlyIncomeSummary.getName());
+    if (csv) msg.push({ type: 'text', text: 'MONTHLY INCOME SUMMARY (CSV):\n' + csv });
+  }
+  if (bundle.cashGLDistribution) {
+    const csv = xlsxToCsv(attachmentBase64(bundle.cashGLDistribution), bundle.cashGLDistribution.getContentType(), bundle.cashGLDistribution.getName());
+    if (csv) msg.push({ type: 'text', text: 'CASH BASIS G/L DISTRIBUTION (CSV):\n' + csv });
+  }
+  // Other PDFs
   if (bundle.delinquency) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.delinquency) } });
-    msg.push({ type: 'text', text: 'Above: Delinquent and Prepaid report' });
+    msg.push({ type: 'text', text: 'Above: Delinquent and Prepaid report (use for topDelinquents unit-level list; use Monthly Transaction Summary totals for delinquentBalance)' });
   }
   if (bundle.leasingActivity) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.leasingActivity) } });
