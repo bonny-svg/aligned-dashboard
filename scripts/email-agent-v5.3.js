@@ -303,11 +303,13 @@ function uploadTowneEastExtras(bundle) {
 function isTowneEastMMRBundle(attachments) {
   const found = {
     mmr: null, delinquency: null, delinquencyXls: null,
+    rentRoll: null,             // Rent Roll XLS (occupancy source when sent standalone)
     leasingActivity: null, residentActivity: null,
     transactionSummary: null,   // Monthly Transaction Summary PDF (authoritative collections/delinquency)
     monthlyIncomeSummary: null, // Monthly Income Summary XLS
     cashGLDistribution: null,   // Cash Basis G/L Distribution XLS
     unmatchedPdfs: [],          // Catch-all for PDFs with UUID/unknown names
+    unmatchedXls: [],           // Catch-all for XLS files with unrecognized names
   };
   attachments.forEach(function(att) {
     const raw  = att.getName().toLowerCase();
@@ -319,6 +321,10 @@ function isTowneEastMMRBundle(attachments) {
     if (!found.mmr && isXls &&
         (name.includes('mmr') || name.includes('monthly management') || name.includes('weekly agenda') || name.includes('te mmr'))) {
       found.mmr = att; return;
+    }
+    if (!found.rentRoll && isXls &&
+        (name.includes('rent roll') || name.includes('rentroll') || name.includes('roll detail'))) {
+      found.rentRoll = att; return;
     }
     if (!found.monthlyIncomeSummary && isXls &&
         (name.includes('monthly income') || name.includes('income summary'))) {
@@ -351,14 +357,22 @@ function isTowneEastMMRBundle(attachments) {
       found.residentActivity = att; return;
     }
     // Catch-all: any remaining PDF (UUID names, etc.) — likely Monthly Transaction Summary
-    if (isPdf) { found.unmatchedPdfs.push(att); }
+    if (isPdf) { found.unmatchedPdfs.push(att); return; }
+    // Catch-all: any remaining XLS (could be delinquency or other report)
+    if (isXls) { found.unmatchedXls.push(att); }
   });
   // Assign first unmatched PDF as transactionSummary if we didn't find one by name
   if (!found.transactionSummary && found.unmatchedPdfs.length > 0) {
     found.transactionSummary = found.unmatchedPdfs[0];
   }
+  // Assign first unmatched XLS as delinquencyXls if we didn't find one by name
+  if (!found.delinquencyXls && found.unmatchedXls.length > 0) {
+    found.delinquencyXls = found.unmatchedXls[0];
+  }
+  // Trigger on: MMR, delinquency, income files, OR a rent roll (rent roll alone is enough
+  // to route through the Claude extraction path so occupancy+leasing data gets updated)
   return (found.mmr || found.delinquency || found.delinquencyXls ||
-          found.transactionSummary || found.monthlyIncomeSummary) ? found : null;
+          found.transactionSummary || found.monthlyIncomeSummary || found.rentRoll) ? found : null;
 }
 
 var TE_METRICS_PROMPT =
@@ -449,6 +463,12 @@ function uploadTowneEastFromMMR(bundle) {
   if (bundle.mmr) {
     const csv = xlsxToCsv(attachmentBase64(bundle.mmr), bundle.mmr.getContentType(), bundle.mmr.getName());
     if (csv) msg.push({ type: 'text', text: 'MMR EXCEL (CSV):\n' + csv });
+  }
+  // Rent Roll XLS → CSV (occupancy, lease dates, move-outs — use for occupancy/leasing fields)
+  if (bundle.rentRoll) {
+    const csv = xlsxToCsv(attachmentBase64(bundle.rentRoll), bundle.rentRoll.getContentType(), bundle.rentRoll.getName());
+    if (csv) msg.push({ type: 'text', text: 'RENT ROLL (CSV — use for occupancy, NTV, leaseEnd, leaseStart, leaseRent, marketRent):\n' + csv });
+    Utilities.sleep(1000);
   }
   // Monthly Transaction Summary PDF — primary source for collections & delinquency
   if (bundle.transactionSummary) {
