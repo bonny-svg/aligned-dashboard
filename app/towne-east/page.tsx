@@ -479,7 +479,7 @@ export default function TowneEastPage() {
                   budget={budget.badDebt}
                   formatVal={fmt}
                   higherIsBetter={false}
-                  sub={`${metrics.delinquentCount} unit${metrics.delinquentCount !== 1 ? "s" : ""} past due`}
+                  sub={`${metrics.delinquentCount ?? 0} unit${(metrics.delinquentCount ?? 0) !== 1 ? "s" : ""} past due`}
                 />
               </div>
 
