@@ -177,9 +177,21 @@ const TE_BUDGET: Record<number, { gpr: number; netRental: number; badDebt: numbe
   12: { gpr: 109_000, netRental: 96_037, badDebt: 1_545, physOcc: 95, econOcc: 88.1 },
 };
 
+// ─── METRICS SANITIZER ───────────────────────────────────────────────────────
+// Claude occasionally returns null for array fields. Normalize before render.
+function sanitizeMetrics(m: TowneEastMetrics): TowneEastMetrics {
+  return {
+    ...m,
+    topDelinquents:         Array.isArray(m.topDelinquents)         ? m.topDelinquents         : [],
+    leaseExpirationByMonth: Array.isArray(m.leaseExpirationByMonth) ? m.leaseExpirationByMonth : [],
+    moveOutsThisMonth:      Array.isArray(m.moveOutsThisMonth)      ? m.moveOutsThisMonth      : [],
+    leaseStartsThisMonth:   Array.isArray(m.leaseStartsThisMonth)   ? m.leaseStartsThisMonth   : [],
+  };
+}
+
 // ─── CACHE ───────────────────────────────────────────────────────────────────
-const CACHE_KEY    = "te-metrics-cache-v1";
-const CACHE_TS_KEY = "te-metrics-cache-ts-v1";
+const CACHE_KEY    = "te-metrics-cache-v2";
+const CACHE_TS_KEY = "te-metrics-cache-ts-v2";
 
 function saveCache(uploadedAt: string, metrics: TowneEastMetrics) {
   try {
@@ -193,7 +205,7 @@ function loadCache(): { metrics: TowneEastMetrics; uploadedAt: string } | null {
     const raw = localStorage.getItem(CACHE_KEY);
     const ts  = localStorage.getItem(CACHE_TS_KEY);
     if (!raw || !ts) return null;
-    return { metrics: JSON.parse(raw) as TowneEastMetrics, uploadedAt: ts };
+    return { metrics: sanitizeMetrics(JSON.parse(raw) as TowneEastMetrics), uploadedAt: ts };
   } catch { return null; }
 }
 
@@ -330,8 +342,9 @@ export default function TowneEastPage() {
           computed = computeTowneEastMetrics(parseRentRoll(rr), parseAvailability(av), parseResidentBalances(rb));
         }
 
-        setMetrics(computed);
-        saveCache(data.snapshot.uploadedAt, computed);
+        const safe = sanitizeMetrics(computed);
+        setMetrics(safe);
+        saveCache(data.snapshot.uploadedAt, safe);
         setSyncStatus("idle");
       } catch (err) {
         setSyncStatus("error");
