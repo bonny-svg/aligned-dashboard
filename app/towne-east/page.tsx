@@ -502,7 +502,7 @@ export default function TowneEastPage() {
                 </table>
               </div></CardContent></Card>
 
-              {metrics.topDelinquents.length > 0 && (
+              {(metrics.topDelinquents ?? []).length > 0 && (
                 <Card className="border-gray-200 mt-4"><CardContent className="p-0"><div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200"><tr>
@@ -511,7 +511,7 @@ export default function TowneEastPage() {
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Balance</th>
                     </tr></thead>
                     <tbody className="divide-y divide-gray-100">
-                      {metrics.topDelinquents.map((d) => (
+                      {(metrics.topDelinquents ?? []).map((d) => (
                         <tr key={d.unit} className="hover:bg-gray-50/60">
                           <td className="px-4 py-2 text-sm font-mono font-semibold text-gray-900">{d.unit}</td>
                           <td className="px-4 py-2 text-sm text-gray-700">{d.name}</td>
@@ -640,7 +640,7 @@ export default function TowneEastPage() {
                     ))}
                   </tr></thead>
                   <tbody className="divide-y divide-gray-100">
-                    {metrics.leaseExpirationByMonth.map((row) => (
+                    {(metrics.leaseExpirationByMonth ?? []).map((row) => (
                       <tr key={row.month} className="hover:bg-gray-50/60">
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.month}</td>
                         <td className="px-4 py-3 text-sm font-bold text-gray-900">{row.expiring}</td>
@@ -651,9 +651,9 @@ export default function TowneEastPage() {
                   </tbody>
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200"><tr>
                     <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total (6 mo)</td>
-                    <td className="px-4 py-2.5 font-bold text-gray-900">{metrics.leaseExpirationByMonth.reduce((s, r) => s + r.expiring, 0)}</td>
-                    <td className="px-4 py-2.5 font-bold text-red-600">{metrics.leaseExpirationByMonth.reduce((s, r) => s + r.ntv, 0)}</td>
-                    <td className="px-4 py-2.5 font-bold text-amber-600">{metrics.leaseExpirationByMonth.reduce((s, r) => s + r.mtm, 0)}</td>
+                    <td className="px-4 py-2.5 font-bold text-gray-900">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.expiring, 0)}</td>
+                    <td className="px-4 py-2.5 font-bold text-red-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.ntv, 0)}</td>
+                    <td className="px-4 py-2.5 font-bold text-amber-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.mtm, 0)}</td>
                   </tr></tfoot>
                 </table>
               </div></CardContent></Card>
