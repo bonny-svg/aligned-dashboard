@@ -178,14 +178,42 @@ const TE_BUDGET: Record<number, { gpr: number; netRental: number; badDebt: numbe
 };
 
 // ─── METRICS SANITIZER ───────────────────────────────────────────────────────
-// Claude occasionally returns null for array fields. Normalize before render.
+// Claude sometimes returns null/undefined for fields. Normalize before render.
 function sanitizeMetrics(m: TowneEastMetrics): TowneEastMetrics {
+  const n = (v: unknown): number => (typeof v === "number" && !isNaN(v) ? v : 0);
   return {
     ...m,
-    topDelinquents:         Array.isArray(m.topDelinquents)         ? m.topDelinquents         : [],
-    leaseExpirationByMonth: Array.isArray(m.leaseExpirationByMonth) ? m.leaseExpirationByMonth : [],
-    moveOutsThisMonth:      Array.isArray(m.moveOutsThisMonth)      ? m.moveOutsThisMonth      : [],
-    leaseStartsThisMonth:   Array.isArray(m.leaseStartsThisMonth)   ? m.leaseStartsThisMonth   : [],
+    unitCount:                n(m.unitCount),
+    occupiedCount:            n(m.occupiedCount),
+    occupiedNTVCount:         n(m.occupiedNTVCount),
+    vacantCount:              n(m.vacantCount),
+    physicalOccupancyPct:     n(m.physicalOccupancyPct),
+    leasedOccupancyPct:       n(m.leasedOccupancyPct),
+    gpr:                      n(m.gpr),
+    totalLeaseRent:           n(m.totalLeaseRent),
+    economicOccupancyPct:     n(m.economicOccupancyPct),
+    totalCharged:             n(m.totalCharged),
+    totalCollected:           n(m.totalCollected),
+    collectionRatePct:        n(m.collectionRatePct),
+    delinquentBalance:        n(m.delinquentBalance),
+    priorPeriodBalance:       n(m.priorPeriodBalance),
+    newDelinquencyThisPeriod: n(m.newDelinquencyThisPeriod),
+    delinquentCount:          n(m.delinquentCount),
+    moveOutsNTVCount:         n(m.moveOutsNTVCount),
+    monthToMonthCount:        n(m.monthToMonthCount),
+    signedLeasesMTD:          n(m.signedLeasesMTD),
+    expiring30d:              n(m.expiring30d),
+    expiring60d:              n(m.expiring60d),
+    expiring90d:              n(m.expiring90d),
+    vacantTotalCount:         n(m.vacantTotalCount),
+    notReadyCount:            n(m.notReadyCount),
+    rentReadyCount:           n(m.rentReadyCount),
+    inProcessCount:           n(m.inProcessCount),
+    notStartedCount:          n(m.notStartedCount),
+    topDelinquents:           Array.isArray(m.topDelinquents)         ? m.topDelinquents         : [],
+    leaseExpirationByMonth:   Array.isArray(m.leaseExpirationByMonth) ? m.leaseExpirationByMonth : [],
+    moveOutsThisMonth:        Array.isArray(m.moveOutsThisMonth)      ? m.moveOutsThisMonth      : [],
+    leaseStartsThisMonth:     Array.isArray(m.leaseStartsThisMonth)   ? m.leaseStartsThisMonth   : [],
   };
 }
 
