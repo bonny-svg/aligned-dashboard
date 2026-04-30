@@ -369,10 +369,12 @@ function isTowneEastMMRBundle(attachments) {
   if (!found.delinquencyXls && found.unmatchedXls.length > 0) {
     found.delinquencyXls = found.unmatchedXls[0];
   }
-  // Trigger on: MMR, delinquency, income files, OR a rent roll (rent roll alone is enough
-  // to route through the Claude extraction path so occupancy+leasing data gets updated)
-  return (found.mmr || found.delinquency || found.delinquencyXls ||
-          found.transactionSummary || found.monthlyIncomeSummary || found.rentRoll) ? found : null;
+  // Trigger on ANY XLS or PDF — if the email is Towne East, always run extraction
+  const hasAny = found.mmr || found.rentRoll || found.delinquency || found.delinquencyXls ||
+                 found.transactionSummary || found.monthlyIncomeSummary || found.cashGLDistribution ||
+                 found.leasingActivity || found.residentActivity ||
+                 found.unmatchedPdfs.length > 0 || found.unmatchedXls.length > 0;
+  return hasAny ? found : null;
 }
 
 var TE_METRICS_PROMPT =
