@@ -474,9 +474,12 @@ var TE_METRICS_PROMPT =
   '     → If > $15K: you read "Net Balance" instead of "Current" aging bucket — find the correct column\n' +
   '  6. Each topDelinquent amount must be < $10K\n' +
   '     → If any entry shows $30K+: it is the totals row — do not include it\n' +
-  '  7. monthToMonthCount: scan every Occupied/Occupied-NTV row for a Lease End date before {{TODAY}}\n' +
-  '     → If you find any such rows, monthToMonthCount must be > 0\n' +
-  '     → If monthToMonthCount = 0, confirm you found zero Occupied rows with a past Lease End date\n\n' +
+  '  7. Lease coverage check — every occupied unit must be accounted for:\n' +
+  '     Compute: leaseExpirationByMonth[0].expiring + [1].expiring + ... + [5].expiring + monthToMonthCount\n' +
+  '     That total must equal occupiedCount + occupiedNTVCount (every occupied unit has a lease end date somewhere)\n' +
+  '     → If the total is less: you missed rows — re-scan the ENTIRE rent roll for Occupied/NTV units and assign each to its month\n' +
+  '     → Lease End dates before {{TODAY}}: add to monthToMonthCount\n' +
+  '     → Lease End dates more than 6 months out: these are OK to exclude from the table but still count them for the check\n\n' +
   '  Add a brief "sanityNotes" string describing: which source you used for each section,\n' +
   '  any corrections you made, and any fields genuinely missing from available data.\n' +
   '  Return 0 for any field you cannot find — do not guess.\n';
