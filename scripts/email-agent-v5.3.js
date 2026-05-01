@@ -1038,8 +1038,9 @@ function xlsxDelinquencyCsv(base64Data, mimeType, fileName) {
   } catch(e) { Logger.log('  xlsxDelinquencyCsv error: ' + e.message); return null; }
 }
 
-// Rent roll extractor: converts all sheets but limits to 30K chars.
-// For a 100-unit property this is always sufficient.
+// Rent roll extractor. Formats Date cells as MM/DD/YYYY to keep rows compact
+// (verbose JS date strings like "Fri Feb 28 2026 00:00:00 GMT-0600..." bloat the
+// CSV to 30K+ chars for 100 units, cutting off the last rows). Limit raised to 100K.
 function xlsxRentRollCsv(base64Data, mimeType, fileName) {
   try {
     const bytes = Utilities.base64Decode(base64Data);
@@ -1055,12 +1056,18 @@ function xlsxRentRollCsv(base64Data, mimeType, fileName) {
       const parts  = [];
       for (var i = 0; i < sheets.length; i++) {
         const data = sheets[i].getDataRange().getValues();
+        // Format Date objects as MM/DD/YYYY so rows stay compact
+        const formatted = data.map(function(row) {
+          return row.map(function(cell) {
+            return cell instanceof Date && !isNaN(cell.getTime()) ? fmtMDY(cell) : cell;
+          });
+        });
         if (sheets.length > 1) {
           parts.push('=== Sheet ' + (i + 1) + ': ' + sheets[i].getName() + ' ===');
         }
-        parts.push(rowsToCsv(data));
+        parts.push(rowsToCsv(formatted));
       }
-      result = parts.join('\n').substring(0, 30000);
+      result = parts.join('\n').substring(0, 100000); // raised from 30K — verbose dates were truncating rows
     } catch(e2) {
       Logger.log('  xlsxRentRollCsv SpreadsheetApp failed: ' + e2.message);
       result = xlsxToCsv(base64Data, mimeType, fileName);
