@@ -48,7 +48,7 @@ export interface TowneEastMetrics {
   expiring30d: number;
   expiring60d: number;
   expiring90d: number;
-  leaseExpirationByMonth: { month: string; expiring: number; ntv: number; mtm: number }[];
+  leaseExpirationByMonth: { month: string; expiring: number; ntv: number; needsRenewal: number }[];
   moveOutsThisMonth: { unit: string; residentName: string; moveOutDate: string }[];
   leaseStartsThisMonth: { unit: string; residentName: string; leaseStart: string }[];
 
@@ -158,10 +158,9 @@ export function computeTowneEastMetrics(
       return le && !isNaN(le.getTime()) && le.getFullYear() === yr && le.getMonth() === mo;
     }).length;
 
-    // MTM units are only relevant in the current month
-    const mtm = i === 0 ? monthToMonthCount : 0;
+    const needsRenewal = Math.max(0, expiring - ntv);
 
-    return { month, expiring, ntv, mtm };
+    return { month, expiring, ntv, needsRenewal };
   });
 
   // ── Renovations (from availability) ──────────────────────────────────────
