@@ -423,21 +423,29 @@ var TE_METRICS_PROMPT =
   '  LEASING — dates are MM/DD/YYYY. TODAY = {{TODAY}}, THIS MONTH = {{TODAY_MONTH}}\n' +
   '  signedLeasesMTD    = Occupied/NTV rows with Lease Start in {{TODAY_MONTH}}\n' +
   '  moveOutsNTVCount   = occupiedNTVCount (same)\n' +
-  '  monthToMonthCount  = Occupied/NTV rows with Lease End BEFORE {{TODAY}} (past end date = expired/month-to-month)\n' +
-  '    Dates in the rent roll are MM/DD/YYYY. Compare month/day/year numerically. Example: 02/28/2026 is BEFORE {{TODAY}}.\n' +
-  '    If ANY Occupied row has a Lease End date earlier than {{TODAY}}, monthToMonthCount must be at least 1.\n' +
+  '\n' +
+  '  LEASE CATEGORIZATION — do this first before computing any counts:\n' +
+  '    Go through EVERY Occupied and Occupied-NTV row in the rent roll one by one.\n' +
+  '    For each row, read the Lease End date and assign it to exactly one bucket:\n' +
+  '      Bucket A (monthToMonthCount): Lease End date is before {{TODAY}} — already expired\n' +
+  '        A date is before {{TODAY}} if: the year is less than {{TODAY_YEAR}},\n' +
+  '        OR the year equals {{TODAY_YEAR}} and the month number is less than {{TODAY_MONTH_NUM}},\n' +
+  '        OR the year equals {{TODAY_YEAR}}, month equals {{TODAY_MONTH_NUM}}, and day is less than {{TODAY_DAY}}\n' +
+  '        Examples of EXPIRED (Bucket A): 08/01/2025, 02/28/2026, 04/15/2026\n' +
+  '        Examples of NOT expired (future): 04/30/2026 (same day = not expired), 05/31/2026\n' +
+  '      Bucket B (leaseExpirationByMonth): Lease End date is in one of the next 6 calendar months\n' +
+  '      Bucket C (ignore for table): Lease End date is more than 6 months out\n' +
+  '    After categorizing every row: monthToMonthCount = count of Bucket A rows\n' +
+  '\n' +
   '  expiring30d/60d/90d = CUMULATIVE count of Occupied/NTV rows with Lease End within +30/+60/+90 days from {{TODAY}}\n' +
   '  moveOutsThisMonth  = [{unit, residentName, moveOutDate}] for NTV units with Lease End in {{TODAY_MONTH}}\n' +
   '  leaseStartsThisMonth = [{unit, residentName, leaseStart}] for units with Lease Start in {{TODAY_MONTH}}\n' +
   '  leaseExpirationByMonth = [{month, expiring, ntv, needsRenewal}] — EXACTLY 6 entries, one per calendar month starting {{TODAY_MONTH}}\n' +
-  '    HOW TO COUNT: For each target month (e.g. "May 2026"):\n' +
-  '      Step 1 — Find all Occupied + Occupied-NTV rows whose Lease End date falls in that EXACT month and year.\n' +
-  '               Match on month number AND year. A lease ending 05/15/2026 counts for May 2026; 05/15/2027 does NOT.\n' +
-  '      Step 2 — expiring = count of those rows\n' +
-  '      Step 3 — ntv = count of those rows whose status is Occupied-NTV\n' +
-  '      Step 4 — needsRenewal = expiring − ntv\n' +
-  '    IMPORTANT: Each lease is counted in exactly ONE month (the month its Lease End date falls in). Do NOT cumulate.\n' +
-  '    Example: if 3 leases end in May and 1 of those is NTV → { month:"May 2026", expiring:3, ntv:1, needsRenewal:2 }\n\n' +
+  '    Use the Bucket B rows from the categorization above. For each of the 6 months:\n' +
+  '      expiring = count of Bucket B rows whose Lease End falls in that exact month+year\n' +
+  '      ntv = count of those that are Occupied-NTV status\n' +
+  '      needsRenewal = expiring − ntv\n' +
+  '    Each lease counts in exactly ONE month. Do NOT cumulate.\n\n' +
 
   'COLLECTIONS — Monthly Transaction Summary PDF\n' +
   '  totalCharged   = "Total Possible Monthly Collections" or total charges billed this month\n' +
@@ -474,19 +482,29 @@ var TE_METRICS_PROMPT =
   '     → If > $15K: you read "Net Balance" instead of "Current" aging bucket — find the correct column\n' +
   '  6. Each topDelinquent amount must be < $10K\n' +
   '     → If any entry shows $30K+: it is the totals row — do not include it\n' +
-  '  7. monthToMonthCount: scan every Occupied/Occupied-NTV row for a Lease End date before {{TODAY}}\n' +
-  '     → If you find any such rows, monthToMonthCount must be > 0\n' +
-  '     → If monthToMonthCount = 0, confirm you found zero Occupied rows with a past Lease End date\n\n' +
+  '  7. Lease coverage check — every occupied unit must be accounted for:\n' +
+  '     Compute: leaseExpirationByMonth[0].expiring + [1].expiring + ... + [5].expiring + monthToMonthCount\n' +
+  '     That total must equal occupiedCount + occupiedNTVCount (every occupied unit has a lease end date somewhere)\n' +
+  '     → If the total is less: you missed rows — re-scan the ENTIRE rent roll for Occupied/NTV units and assign each to its month\n' +
+  '     → Lease End dates before {{TODAY}}: add to monthToMonthCount\n' +
+  '     → Lease End dates more than 6 months out: these are OK to exclude from the table but still count them for the check\n\n' +
   '  Add a brief "sanityNotes" string describing: which source you used for each section,\n' +
   '  any corrections you made, and any fields genuinely missing from available data.\n' +
   '  Return 0 for any field you cannot find — do not guess.\n';
 
 function tePromptWithDate() {
-  var today  = Utilities.formatDate(new Date(), 'America/Chicago', 'MM/dd/yyyy'); // matches rent roll date format
-  var month  = Utilities.formatDate(new Date(), 'America/Chicago', 'MMM yyyy'); // e.g. "Apr 2026"
+  var now       = new Date();
+  var today     = Utilities.formatDate(now, 'America/Chicago', 'MM/dd/yyyy');
+  var month     = Utilities.formatDate(now, 'America/Chicago', 'MMM yyyy');
+  var monthNum  = Utilities.formatDate(now, 'America/Chicago', 'MM');  // e.g. "04"
+  var day       = Utilities.formatDate(now, 'America/Chicago', 'dd');  // e.g. "30"
+  var year      = Utilities.formatDate(now, 'America/Chicago', 'yyyy'); // e.g. "2026"
   return TE_METRICS_PROMPT
     .replace(/\{\{TODAY\}\}/g, today)
-    .replace(/\{\{TODAY_MONTH\}\}/g, month);
+    .replace(/\{\{TODAY_MONTH\}\}/g, month)
+    .replace(/\{\{TODAY_MONTH_NUM\}\}/g, monthNum)
+    .replace(/\{\{TODAY_DAY\}\}/g, day)
+    .replace(/\{\{TODAY_YEAR\}\}/g, year);
 }
 
 // Normalizes whatever JSON Claude returns to match TowneEastMetrics field names.
