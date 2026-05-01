@@ -529,7 +529,7 @@ export default function TowneEastPage() {
                           <td className="px-4 py-2.5 text-sm text-gray-700">{row.label}</td>
                           <td className="px-4 py-2.5 text-sm text-right font-medium text-red-600">{fmt(row.amount)}</td>
                           <td className="px-4 py-2.5 text-sm text-right text-gray-500">
-                            {metrics.delinquentBalance > 0 ? `${((row.amount / metrics.delinquentBalance) * 100).toFixed(1)}%` : "—"}
+                            {metrics.delinquentBalance > 0 ? `${((row.amount / (metrics.priorPeriodBalance + metrics.delinquentBalance)) * 100).toFixed(1)}%` : "—"}
                           </td>
                         </tr>
                       ));
@@ -537,7 +537,7 @@ export default function TowneEastPage() {
                   </tbody>
                   <tfoot className="bg-gray-800"><tr>
                     <td className="px-4 py-2.5 text-sm font-bold text-white">Total Delinquent</td>
-                    <td className="px-4 py-2.5 text-sm text-right font-bold text-red-400">{fmt(metrics.delinquentBalance)}</td>
+                    <td className="px-4 py-2.5 text-sm text-right font-bold text-red-400">{fmt(metrics.priorPeriodBalance + metrics.delinquentBalance)}</td>
                     <td className="px-4 py-2.5 text-sm text-right font-bold text-gray-300">100%</td>
                   </tr></tfoot>
                 </table>
@@ -686,7 +686,7 @@ export default function TowneEastPage() {
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.month}</td>
                         <td className="px-4 py-3 text-sm font-bold text-gray-900">{row.expiring}</td>
                         <td className="px-4 py-3 text-sm">{row.ntv > 0 ? <span className="font-semibold text-red-600">{row.ntv}</span> : <span className="text-gray-300">—</span>}</td>
-                        <td className="px-4 py-3 text-sm">{row.needsRenewal > 0 ? <span className="font-semibold text-amber-600">{row.needsRenewal}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-3 text-sm">{(() => { const nr = row.needsRenewal ?? Math.max(0, (row.expiring || 0) - (row.ntv || 0)); return nr > 0 ? <span className="font-semibold text-amber-600">{nr}</span> : <span className="text-gray-300">—</span>; })()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -694,7 +694,7 @@ export default function TowneEastPage() {
                     <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total (6 mo)</td>
                     <td className="px-4 py-2.5 font-bold text-gray-900">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.expiring, 0)}</td>
                     <td className="px-4 py-2.5 font-bold text-red-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.ntv, 0)}</td>
-                    <td className="px-4 py-2.5 font-bold text-amber-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + (r.needsRenewal ?? 0), 0)}</td>
+                    <td className="px-4 py-2.5 font-bold text-amber-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + (r.needsRenewal ?? Math.max(0, (r.expiring || 0) - (r.ntv || 0))), 0)}</td>
                   </tr></tfoot>
                 </table>
               </div></CardContent></Card>
