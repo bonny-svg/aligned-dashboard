@@ -423,12 +423,21 @@ var TE_METRICS_PROMPT =
   '  LEASING — dates are MM/DD/YYYY. TODAY = {{TODAY}}, THIS MONTH = {{TODAY_MONTH}}\n' +
   '  signedLeasesMTD    = Occupied/NTV rows with Lease Start in {{TODAY_MONTH}}\n' +
   '  moveOutsNTVCount   = occupiedNTVCount (same)\n' +
-  '  monthToMonthCount  = Occupied/NTV rows with Lease End BEFORE {{TODAY}} (past end date = month-to-month)\n' +
+  '  monthToMonthCount  = Occupied/NTV rows with Lease End BEFORE {{TODAY}} (past end date = expired/month-to-month)\n' +
+  '    Dates in the rent roll are MM/DD/YYYY. Compare month/day/year numerically. Example: 02/28/2026 is BEFORE {{TODAY}}.\n' +
+  '    If ANY Occupied row has a Lease End date earlier than {{TODAY}}, monthToMonthCount must be at least 1.\n' +
   '  expiring30d/60d/90d = CUMULATIVE count of Occupied/NTV rows with Lease End within +30/+60/+90 days from {{TODAY}}\n' +
   '  moveOutsThisMonth  = [{unit, residentName, moveOutDate}] for NTV units with Lease End in {{TODAY_MONTH}}\n' +
   '  leaseStartsThisMonth = [{unit, residentName, leaseStart}] for units with Lease Start in {{TODAY_MONTH}}\n' +
-  '  leaseExpirationByMonth = [{month, expiring, ntv, needsRenewal}] for next 6 months starting {{TODAY_MONTH}}\n' +
-  '    needsRenewal = expiring − ntv (leases expiring that month with no notice given yet — renewal targets)\n\n' +
+  '  leaseExpirationByMonth = [{month, expiring, ntv, needsRenewal}] — EXACTLY 6 entries, one per calendar month starting {{TODAY_MONTH}}\n' +
+  '    HOW TO COUNT: For each target month (e.g. "May 2026"):\n' +
+  '      Step 1 — Find all Occupied + Occupied-NTV rows whose Lease End date falls in that EXACT month and year.\n' +
+  '               Match on month number AND year. A lease ending 05/15/2026 counts for May 2026; 05/15/2027 does NOT.\n' +
+  '      Step 2 — expiring = count of those rows\n' +
+  '      Step 3 — ntv = count of those rows whose status is Occupied-NTV\n' +
+  '      Step 4 — needsRenewal = expiring − ntv\n' +
+  '    IMPORTANT: Each lease is counted in exactly ONE month (the month its Lease End date falls in). Do NOT cumulate.\n' +
+  '    Example: if 3 leases end in May and 1 of those is NTV → { month:"May 2026", expiring:3, ntv:1, needsRenewal:2 }\n\n' +
 
   'COLLECTIONS — Monthly Transaction Summary PDF\n' +
   '  totalCharged   = "Total Possible Monthly Collections" or total charges billed this month\n' +
@@ -464,13 +473,16 @@ var TE_METRICS_PROMPT =
   '  5. delinquentBalance must be < $15K\n' +
   '     → If > $15K: you read "Net Balance" instead of "Current" aging bucket — find the correct column\n' +
   '  6. Each topDelinquent amount must be < $10K\n' +
-  '     → If any entry shows $30K+: it is the totals row — do not include it\n\n' +
+  '     → If any entry shows $30K+: it is the totals row — do not include it\n' +
+  '  7. monthToMonthCount: scan every Occupied/Occupied-NTV row for a Lease End date before {{TODAY}}\n' +
+  '     → If you find any such rows, monthToMonthCount must be > 0\n' +
+  '     → If monthToMonthCount = 0, confirm you found zero Occupied rows with a past Lease End date\n\n' +
   '  Add a brief "sanityNotes" string describing: which source you used for each section,\n' +
   '  any corrections you made, and any fields genuinely missing from available data.\n' +
   '  Return 0 for any field you cannot find — do not guess.\n';
 
 function tePromptWithDate() {
-  var today  = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd');
+  var today  = Utilities.formatDate(new Date(), 'America/Chicago', 'MM/dd/yyyy'); // matches rent roll date format
   var month  = Utilities.formatDate(new Date(), 'America/Chicago', 'MMM yyyy'); // e.g. "Apr 2026"
   return TE_METRICS_PROMPT
     .replace(/\{\{TODAY\}\}/g, today)
