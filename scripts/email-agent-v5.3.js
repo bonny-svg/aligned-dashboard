@@ -705,9 +705,10 @@ function uploadTowneEastFromMMR(bundle) {
     const csv = xlsxToCsv(attachmentBase64(bundle.mmr), bundle.mmr.getContentType(), bundle.mmr.getName());
     if (csv) msg.push({ type: 'text', text: 'MMR EXCEL (CSV):\n' + csv });
   }
+  var rentRollCsv = null;
   if (bundle.rentRoll) {
-    const csv = xlsxRentRollCsv(attachmentBase64(bundle.rentRoll), bundle.rentRoll.getContentType(), bundle.rentRoll.getName());
-    if (csv) msg.push({ type: 'text', text: 'RENT ROLL (CSV):\n' + csv });
+    rentRollCsv = xlsxRentRollCsv(attachmentBase64(bundle.rentRoll), bundle.rentRoll.getContentType(), bundle.rentRoll.getName());
+    if (rentRollCsv) msg.push({ type: 'text', text: 'RENT ROLL (CSV):\n' + rentRollCsv });
     Utilities.sleep(1000);
   }
   if (bundle.transactionSummary) {
@@ -748,13 +749,9 @@ function uploadTowneEastFromMMR(bundle) {
   if (!metrics) { Logger.log('  ✗ TE MMR: Claude extraction failed'); return false; }
 
   // ── Step 4: Override lease date fields with deterministic JS computation ────
-  // Claude is unreliable at counting 100 rows; JavaScript is exact.
-  if (bundle.rentRoll) {
-    var jsLeasing = computeLeasingFromRentRoll(
-      attachmentBase64(bundle.rentRoll),
-      bundle.rentRoll.getContentType(),
-      bundle.rentRoll.getName()
-    );
+  // Reuses the CSV already generated for Claude — no second Drive operation needed.
+  if (rentRollCsv) {
+    var jsLeasing = computeLeasingFromCsv(rentRollCsv);
     if (jsLeasing) {
       metrics.monthToMonthCount       = jsLeasing.monthToMonthCount;
       metrics.expiring30d             = jsLeasing.expiring30d;
@@ -764,7 +761,7 @@ function uploadTowneEastFromMMR(bundle) {
       metrics.leaseExpirationByMonth  = jsLeasing.leaseExpirationByMonth;
       metrics.moveOutsThisMonth       = jsLeasing.moveOutsThisMonth;
       metrics.leaseStartsThisMonth    = jsLeasing.leaseStartsThisMonth;
-      Logger.log('  ✓ Lease counts overridden with JS-computed values (deterministic)');
+      Logger.log('  ✓ Lease counts overridden with JS-computed values (mtm=' + jsLeasing.monthToMonthCount + ' exp90=' + jsLeasing.expiring90d + ')');
     }
   }
 
@@ -781,52 +778,49 @@ function uploadTowneEastFromMMR(bundle) {
   return resp.getResponseCode() < 300;
 }
 
-// ── Deterministic lease counting from rent roll ──────────────────────────────
-// Opens the rent roll XLS directly in Google Sheets and counts every occupied
-// row by lease end date in JavaScript — no LLM involved, always exact.
-function computeLeasingFromRentRoll(base64Data, mimeType, fileName) {
-  var file, converted;
+// ── Deterministic lease counting — parses the CSV already generated for Claude ─
+// No second Drive operation: reuses the string already in memory.
+function computeLeasingFromCsv(csvText) {
+  if (!csvText) return null;
   try {
-    var bytes = Utilities.base64Decode(base64Data);
-    var blob  = Utilities.newBlob(bytes, mimeType, fileName || 'rentroll.xlsx');
-    file      = DriveApp.createFile(blob);
-    converted = Drive.Files.copy(
-      { title: 'aam_rr_' + Date.now(), mimeType: 'application/vnd.google-apps.spreadsheet' },
-      file.getId()
-    );
-    Utilities.sleep(3000);
-
-    var ss   = SpreadsheetApp.openById(converted.id);
-    var data = ss.getSheets()[0].getDataRange().getValues();
+    var lines = csvText.split('\n');
 
     // ── Find header row ──────────────────────────────────────────────────────
-    var hdrRow = -1, cStatus = -1, cLeaseEnd = -1, cLeaseStart = -1, cUnit = -1, cName = -1;
-    for (var r = 0; r < Math.min(15, data.length); r++) {
-      for (var c = 0; c < data[r].length; c++) {
-        var h = String(data[r][c]).toLowerCase().replace(/[^a-z]/g, '');
-        if (h === 'leaseend' || h === 'leaseenddate')            { cLeaseEnd = c; hdrRow = r; }
-        if (h === 'leasestart' || h === 'leasestartdate')          cLeaseStart = c;
-        if (h === 'unitleasestatus' || h === 'status' || h === 'leasestatus') cStatus = c;
-        if (h === 'bldgunit' || h === 'unit' || h === 'unitnumber' || h === 'unitno') cUnit = c;
-        if (h === 'name' || h === 'residentname' || h === 'tenantname') cName = c;
+    var hdrIdx = -1, hdrCols = null;
+    for (var r = 0; r < Math.min(15, lines.length); r++) {
+      var row = parseCsvLine(lines[r]);
+      for (var c = 0; c < row.length; c++) {
+        var h = row[c].toLowerCase().replace(/[^a-z]/g, '');
+        if (h === 'leaseend' || h === 'leaseenddate') { hdrIdx = r; hdrCols = row; break; }
       }
-      if (hdrRow >= 0 && cLeaseEnd >= 0 && cStatus >= 0) break;
+      if (hdrIdx >= 0) break;
     }
-    if (hdrRow < 0 || cLeaseEnd < 0 || cStatus < 0) {
-      Logger.log('  computeLeasingFromRentRoll: required columns not found');
+    if (hdrIdx < 0) { Logger.log('  computeLeasingFromCsv: Lease End column not found in CSV'); return null; }
+
+    var cStatus = -1, cLeaseEnd = -1, cLeaseStart = -1, cUnit = -1, cName = -1;
+    for (var c = 0; c < hdrCols.length; c++) {
+      var h = hdrCols[c].toLowerCase().replace(/[^a-z]/g, '');
+      if (h === 'leaseend' || h === 'leaseenddate')                                cLeaseEnd   = c;
+      if (h === 'leasestart' || h === 'leasestartdate')                            cLeaseStart = c;
+      if (h === 'unitleasestatus' || h === 'status' || h === 'leasestatus')        cStatus     = c;
+      if (h === 'bldgunit' || h === 'unit' || h === 'unitnumber' || h === 'unitno') cUnit      = c;
+      if (h === 'name' || h === 'residentname' || h === 'tenantname')              cName       = c;
+    }
+    if (cLeaseEnd < 0 || cStatus < 0) {
+      Logger.log('  computeLeasingFromCsv: missing Status or Lease End column (status=' + cStatus + ' leaseEnd=' + cLeaseEnd + ')');
       return null;
     }
-    Logger.log('  computeLeasingFromRentRoll: hdr=r' + hdrRow + ' status=c' + cStatus + ' leaseEnd=c' + cLeaseEnd);
+    Logger.log('  computeLeasingFromCsv: header at line ' + hdrIdx + ' status=c' + cStatus + ' leaseEnd=c' + cLeaseEnd);
 
-    // ── Set up date buckets ──────────────────────────────────────────────────
-    var now      = new Date();
-    var today    = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // ── Date buckets ─────────────────────────────────────────────────────────
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     var thisMonth = now.getMonth(), thisYear = now.getFullYear();
 
     var bucketKeys = [], buckets = {};
     for (var i = 0; i < 6; i++) {
-      var bd   = new Date(thisYear, thisMonth + i, 1);
-      var key  = bd.getFullYear() + '/' + bd.getMonth();
+      var bd    = new Date(thisYear, thisMonth + i, 1);
+      var key   = bd.getFullYear() + '/' + bd.getMonth();
       var label = bd.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       bucketKeys.push(key);
       buckets[key] = { month: label, expiring: 0, ntv: 0 };
@@ -835,23 +829,34 @@ function computeLeasingFromRentRoll(base64Data, mimeType, fileName) {
     var mtm = 0, exp30 = 0, exp60 = 0, exp90 = 0, signed = 0;
     var moveOuts = [], starts = [];
 
-    // ── Process every row ────────────────────────────────────────────────────
-    for (var r = hdrRow + 1; r < data.length; r++) {
-      var row       = data[r];
-      var rawStatus = String(row[cStatus] || '').trim().toLowerCase();
-      var isOcc     = rawStatus.indexOf('occupied') >= 0;
-      var isNTV     = rawStatus.indexOf('ntv') >= 0 || rawStatus.indexOf('notice') >= 0;
+    // ── Process every data row ───────────────────────────────────────────────
+    for (var r = hdrIdx + 1; r < lines.length; r++) {
+      var line = lines[r].trim();
+      if (!line) continue;
+      var row = parseCsvLine(line);
+      if (row.length <= Math.max(cStatus, cLeaseEnd)) continue;
+
+      var rawStatus = (row[cStatus] || '').trim().toLowerCase();
+      var isOcc = rawStatus.indexOf('occupied') >= 0;
+      var isNTV = rawStatus.indexOf('ntv') >= 0 || rawStatus.indexOf('notice') >= 0;
       if (!isOcc && !isNTV) continue;
 
-      var unit = cUnit >= 0 ? String(row[cUnit] || '').trim() : '';
-      var name = cName >= 0 ? String(row[cName] || '').trim() : '';
+      var unit = cUnit >= 0 ? (row[cUnit] || '').trim() : '';
+      var name = cName >= 0 ? (row[cName] || '').trim() : '';
 
-      // Lease end
-      var leRaw = row[cLeaseEnd];
-      var le    = leRaw instanceof Date ? leRaw : new Date(String(leRaw));
-      if (!le || isNaN(le.getTime())) continue;
+      var leStr = (row[cLeaseEnd] || '').trim();
+      if (!leStr || leStr === '0') {
+        // Blank lease end on an occupied unit = effectively month-to-month
+        mtm++;
+        continue;
+      }
+
+      var le = new Date(leStr);
+      if (isNaN(le.getTime())) {
+        Logger.log('  computeLeasingFromCsv: unparseable date "' + leStr.substring(0, 30) + '" row ' + r);
+        continue;
+      }
       le = new Date(le.getFullYear(), le.getMonth(), le.getDate());
-
       var days = Math.round((le.getTime() - today.getTime()) / 86400000);
 
       if (days < 0) {
@@ -870,18 +875,19 @@ function computeLeasingFromRentRoll(base64Data, mimeType, fileName) {
         }
       }
 
-      // Lease start (signed MTD)
       if (cLeaseStart >= 0) {
-        var lsRaw = row[cLeaseStart];
-        var ls    = lsRaw instanceof Date ? lsRaw : new Date(String(lsRaw));
-        if (ls && !isNaN(ls.getTime()) && ls.getMonth() === thisMonth && ls.getFullYear() === thisYear) {
-          signed++;
-          starts.push({ unit: unit, residentName: name, leaseStart: fmtMDY(ls) });
+        var lsStr = (row[cLeaseStart] || '').trim();
+        if (lsStr) {
+          var ls = new Date(lsStr);
+          if (!isNaN(ls.getTime()) && ls.getMonth() === thisMonth && ls.getFullYear() === thisYear) {
+            signed++;
+            starts.push({ unit: unit, residentName: name, leaseStart: fmtMDY(ls) });
+          }
         }
       }
     }
 
-    Logger.log('  computeLeasingFromRentRoll: mtm=' + mtm + ' exp30=' + exp30 + ' exp60=' + exp60 + ' exp90=' + exp90 + ' signed=' + signed);
+    Logger.log('  computeLeasingFromCsv: mtm=' + mtm + ' exp30=' + exp30 + ' exp60=' + exp60 + ' exp90=' + exp90 + ' signed=' + signed);
     return {
       monthToMonthCount:      mtm,
       expiring30d:            exp30,
@@ -896,12 +902,27 @@ function computeLeasingFromRentRoll(base64Data, mimeType, fileName) {
       leaseStartsThisMonth: starts,
     };
   } catch(e) {
-    Logger.log('  computeLeasingFromRentRoll error: ' + e.message);
+    Logger.log('  computeLeasingFromCsv error: ' + e.message);
     return null;
-  } finally {
-    try { if (file)      DriveApp.getFileById(file.getId()).setTrashed(true); }      catch(e) {}
-    try { if (converted) DriveApp.getFileById(converted.id).setTrashed(true); } catch(e) {}
   }
+}
+
+// Parses a single CSV line, handling quoted fields correctly.
+function parseCsvLine(line) {
+  var result = [], cur = '', inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === ',' && !inQ) {
+      result.push(cur); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  result.push(cur);
+  return result;
 }
 
 function fmtMDY(d) {
