@@ -668,9 +668,8 @@ export default function TowneEastPage() {
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                 <StatCard label="Expiring (90 days)"  value={`${metrics.expiring90d} leases`} />
-                <StatCard label="Signed MTD"          value={`${metrics.signedLeasesMTD}`}      color="text-emerald-600" />
                 <StatCard label="Vacating / NTV"      value={`${metrics.moveOutsNTVCount}`}      color="text-red-600" />
-                <StatCard label="Month-to-Month"      value={`${metrics.monthToMonthCount}`}     color="text-amber-600" />
+                <StatCard label="Expired / MTM"       value={`${metrics.monthToMonthCount}`}     color="text-amber-600" />
               </div>
 
               <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
