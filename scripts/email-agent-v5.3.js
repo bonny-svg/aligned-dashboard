@@ -377,133 +377,344 @@ function isTowneEastMMRBundle(attachments) {
   return hasAny ? found : null;
 }
 
+// TE_METRICS_PROMPT: analyst-style with domain knowledge + self-validation.
+// JSON schema is enforced via API prefill in callClaudeTEMetrics.
 var TE_METRICS_PROMPT =
-  'You are extracting Towne East Village (100-unit, Converse TX) dashboard metrics from the attached reports.\n\n' +
-  'Sources may include: Rent Roll XLS/CSV, Delinquent & Prepaid XLS/CSV, Monthly Transaction Summary PDF, MMR Excel.\n' +
-  'Return ONLY the JSON below (no markdown). Use 0 or "" for any field not found.\n\n' +
+  'You are a senior multifamily financial analyst with 15+ years reviewing OneSite property management reports.\n' +
+  'You are extracting dashboard metrics for Towne East Village — a 100-unit apartment community in Converse, TX.\n\n' +
+  'YOUR JOB: Understand the data by meaning and financial logic, not by exact column names.\n' +
+  'Column headers may shift or be renamed — use your expertise to find the right number.\n\n' +
 
-  'OCCUPANCY RULES — from the Rent Roll (Unit/Lease Status column):\n' +
-  '- The status column contains exact values: "Occupied", "Occupied-NTV", "Vacant", "Former resident"\n' +
-  '- occupiedCount = count of rows where Unit/Lease Status = exactly "Occupied"\n' +
-  '- occupiedNTVCount = count of rows where Unit/Lease Status = exactly "Occupied-NTV"\n' +
-  '- vacantCount = count of rows where Unit/Lease Status = exactly "Vacant"\n' +
-  '- Ignore "Former resident" rows for all counts\n' +
-  '- physicalOccupancyPct = (occupiedCount + occupiedNTVCount) / 100 * 100\n' +
-  '- leasedOccupancyPct = physicalOccupancyPct (no Vacant-Leased units at this property)\n' +
-  '- gpr = SUM of "Market + Addl." column for Occupied + Occupied-NTV + Vacant rows (not Former)\n' +
-  '- totalLeaseRent = SUM of "Lease Rent" column for Occupied + Occupied-NTV rows only\n' +
-  '- economicOccupancyPct = totalLeaseRent / gpr * 100\n\n' +
+  'RENT ROLL — lists every unit with its lease status\n' +
+  '  Status column uses exactly: Occupied | Occupied-NTV | Vacant | Former resident\n' +
+  '  "Occupied"     = active resident with a current lease\n' +
+  '  "Occupied-NTV" = resident who gave notice to vacate — still paying rent but leaving soon\n' +
+  '  "Vacant"       = no resident; unit is available\n' +
+  '  occupiedCount    = count of "Occupied" rows (exact match only)\n' +
+  '  occupiedNTVCount = count of "Occupied-NTV" rows\n' +
+  '  vacantCount      = count of "Vacant" rows\n' +
+  '  unitCount        = total non-"Former resident" rows (expect ~100)\n' +
+  '  physicalOccupancyPct = (occupiedCount + occupiedNTVCount) / 100 × 100\n' +
+  '  leasedOccupancyPct   = physicalOccupancyPct (same at this property)\n\n' +
 
-  'LEASING RULES — from Rent Roll, dates are in MM/DD/YYYY text format, TODAY = ' + '{{TODAY}}' + ':\n' +
-  '- signedLeasesMTD = count of Occupied/Occupied-NTV rows where Lease Start month+year = current month\n' +
-  '- moveOutsNTVCount = occupiedNTVCount\n' +
-  '- expiring30d = count of Occupied/NTV rows where Lease End is between today and today+30 days (inclusive)\n' +
-  '- expiring60d = count where Lease End is between today and today+60 days\n' +
-  '- expiring90d = count where Lease End is between today and today+90 days\n' +
-  '- monthToMonthCount = count of Occupied/NTV rows where Lease End is BEFORE today\n' +
-  '- moveOutsThisMonth = array of NTV units whose Lease End falls in the CURRENT calendar month\n' +
-  '  format: [{"unit":"421","residentName":"Wright, Jerrell","moveOutDate":"2026-05-31"}]\n' +
-  '- leaseStartsThisMonth = array of Occupied/NTV units whose Lease Start is in the current month\n' +
-  '  format: [{"unit":"115","residentName":"Sierra De Nieto, Monica","leaseStart":"2026-04-01"}]\n' +
-  '- leaseExpirationByMonth = array of 6 objects for next 6 calendar months starting this month:\n' +
-  '  [{"month":"Apr 2026","expiring":N,"ntv":N,"mtm":N}, ...]\n' +
-  '  expiring = all Occupied/NTV with leaseEnd in that month, ntv = NTV subset, mtm = monthToMonthCount (current month only, else 0)\n\n' +
+  '  FINANCIAL columns — HOW TO IDENTIFY THE RIGHT COLUMN:\n' +
+  '  The rent roll has several rent columns. Use financial logic to pick the right one, not the header name.\n\n' +
+  '  GPR column = the HIGHEST rent figure per unit — what the unit would rent for at full market rate.\n' +
+  '    It applies to every unit (occupied, vacant, NTV) because GPR = 100% occupancy potential.\n' +
+  '    Common headers: "Market Rent", "Market Rate", "Gross Potential", "Scheduled Rent", "Asking Rent"\n' +
+  '    Sanity check: sum should be $90K-$110K for 100 units. Average per unit ~$950-$1,050.\n\n' +
+  '  Lease Rent column = what the resident actually signed their lease for — often LOWER than market.\n' +
+  '    It only applies to Occupied + Occupied-NTV rows (vacant units have no lease).\n' +
+  '    Common headers: "Contract Rent", "Lease Rent", "Actual Rent", "Resident Rent", "Charge"\n' +
+  '    Sanity check: must be ≤ market rent for the same unit. If lease rent > market rent, you picked the wrong column.\n\n' +
+  '  TRAINING EXAMPLES — what you will see and what to do:\n' +
+  '  • Columns: [Market Rent] [Contract Rent] → GPR = Market Rent,  leaseRent = Contract Rent ✓\n' +
+  '  • Columns: [Asking Rent] [Lease Rent]    → GPR = Asking Rent,  leaseRent = Lease Rent ✓\n' +
+  '  • Columns: [Gross Rent]  [Net Rent]      → GPR = Gross Rent,   leaseRent = Net Rent ✓\n' +
+  '  • Columns: [Rent] [Concession] [Charge]  → GPR = Rent,         leaseRent = Charge (rent minus concession) ✓\n' +
+  '  • Only one rent column visible           → use it for both; set economicOccupancyPct = physicalOccupancyPct\n\n' +
+  '  SELF-TEST before finalizing: pick any occupied unit and confirm leaseRent ≤ marketRent for that row.\n' +
+  '  If leaseRent > marketRent, you have the columns backwards — swap them.\n\n' +
+  '  gpr (Gross Potential Rent) = SUM of the GPR column for all non-Former rows\n' +
+  '    For 100 units at ~$900-$1,100/unit = $90K-$110K.\n' +
+  '  totalLeaseRent = SUM of the Lease Rent column for Occupied + Occupied-NTV rows only\n' +
+  '  economicOccupancyPct = totalLeaseRent / gpr × 100  (healthy range: 80-95%)\n\n' +
 
-  'COLLECTIONS RULES — from Monthly Transaction Summary PDF (highest priority):\n' +
-  '- gpr = "Gross Market Rent*" in MONTHLY RENTAL POTENTIAL COMPUTATION section\n' +
-  '- totalCollected = "Current Monthly Rental Collections" (bottom summary, e.g. 82,295.66)\n' +
-  '- totalCharged = "Total Possible Monthly Collections" (e.g. 120,079.90)\n' +
-  '- collectionRatePct = totalCollected / totalCharged * 100\n' +
-  '- Do NOT use MTSR for delinquentBalance — see DELINQUENCY RULES below\n\n' +
+  '  LEASING — dates are MM/DD/YYYY. TODAY = {{TODAY}}, THIS MONTH = {{TODAY_MONTH}}\n' +
+  '  signedLeasesMTD    = Occupied/NTV rows with Lease Start in {{TODAY_MONTH}}\n' +
+  '  moveOutsNTVCount   = occupiedNTVCount (same)\n' +
+  '  monthToMonthCount  = Occupied/NTV rows with Lease End BEFORE {{TODAY}} (past end date = month-to-month)\n' +
+  '  expiring30d/60d/90d = CUMULATIVE count of Occupied/NTV rows with Lease End within +30/+60/+90 days from {{TODAY}}\n' +
+  '  moveOutsThisMonth  = [{unit, residentName, moveOutDate}] for NTV units with Lease End in {{TODAY_MONTH}}\n' +
+  '  leaseStartsThisMonth = [{unit, residentName, leaseStart}] for units with Lease Start in {{TODAY_MONTH}}\n' +
+  '  leaseExpirationByMonth = [{month, expiring, ntv, needsRenewal}] for next 6 months starting {{TODAY_MONTH}}\n' +
+  '    needsRenewal = expiring − ntv (leases expiring that month with no notice given yet — renewal targets)\n\n' +
 
-  'DELINQUENCY RULES — from Delinquent & Prepaid XLS (two sheets when converted to CSV):\n\n' +
-  'The XLS has TWO sheets:\n' +
-  '  Sheet1 = per-charge detail rows. Has a TOTALS row at the bottom.\n' +
-  '  Sheet2 = per-resident summary rows (one row per resident, already aggregated).\n\n' +
-  'Step 1 — Get delinquentBalance and priorPeriodBalance from the TOTALS row in Sheet1:\n' +
-  '  Find the row labeled "TOTALS" (or the last data row with comma-separated numeric totals).\n' +
-  '  The columns are: ..., Net Balance, Current, 30 Days, 60 Days, 90+ Days, ...\n' +
-  '  - delinquentBalance = the "Current" column value in the TOTALS row (e.g. 2535.50)\n' +
-  '  - priorPeriodBalance = the "30 Days" column value in the TOTALS row (e.g. 9674.35)\n' +
-  '  - newDelinquencyThisPeriod = delinquentBalance\n' +
-  '  Do NOT sum per-resident rows — use the TOTALS row directly.\n\n' +
-  'Step 2 — Get topDelinquents and delinquentCount from Sheet2 (per-resident summary):\n' +
-  '  Sheet2 columns: Resh ID, Lease ID, Bldg/Unit, Name, Phone, Email, Status, Move-In/Out,\n' +
-  '    Total Prepaid, Total Delinquent, D, O, Net Balance, Current, 30 Days, 60 Days, 90+ Days, ...\n' +
-  '  Filter to rows where Status = "Current resident" OR "NTV" AND Net Balance > 0.\n' +
-  '  Sort by Net Balance descending. Take top 8 for topDelinquents.\n' +
-  '  - topDelinquents format: [{"unit":"825","name":"Martin, Jessica","amount":2801.00}]\n' +
-  '  - delinquentCount = count of qualifying rows (current/NTV with Net Balance > 0)\n\n' +
-  '{"asOf":"YYYY-MM-DD","unitCount":100,"occupiedCount":0,"occupiedNTVCount":0,"vacantCount":0,' +
-  '"physicalOccupancyPct":0,"leasedOccupancyPct":0,"gpr":0,"totalLeaseRent":0,"economicOccupancyPct":0,' +
-  '"totalCharged":0,"totalCollected":0,"collectionRatePct":0,' +
-  '"delinquentBalance":0,"priorPeriodBalance":0,"newDelinquencyThisPeriod":0,"delinquentCount":0,' +
-  '"topDelinquents":[{"unit":"","name":"","amount":0}],' +
-  '"moveOutsNTVCount":0,"monthToMonthCount":0,"signedLeasesMTD":0,' +
-  '"expiring30d":0,"expiring60d":0,"expiring90d":0,"leaseExpirationByMonth":[],' +
-  '"moveOutsThisMonth":[{"unit":"","residentName":"","moveOutDate":""}],' +
-  '"leaseStartsThisMonth":[{"unit":"","residentName":"","leaseStart":""}],' +
-  '"vacantTotalCount":0,"notReadyCount":0,"rentReadyCount":0,"inProcessCount":0,"notStartedCount":0}';
+  'COLLECTIONS — Monthly Transaction Summary PDF\n' +
+  '  totalCharged   = "Total Possible Monthly Collections" or total charges billed this month\n' +
+  '  totalCollected = "Current Monthly Rental Collections" or total payments received\n' +
+  '    Healthy collection rate is 85-98%. If totalCollected > totalCharged, you have the wrong values.\n' +
+  '  collectionRatePct = totalCollected / totalCharged × 100\n\n' +
+
+  'DELINQUENCY — Delinquent & Prepaid XLS (2 sheets)\n' +
+  '  Sheet 1 = per-charge line items. The LAST data row = TOTALS row (summary of all columns).\n' +
+  '  Sheet 2 = per-resident summary — one row per resident showing their net balance and aging.\n' +
+  '  Aging columns: Net Balance | Current | 30 Days | 60 Days | 90+ Days\n' +
+  '    "Current"     = charges from THIS billing cycle already overdue  ← this is delinquentBalance\n' +
+  '    "Net Balance" = total across ALL aging buckets combined          ← do NOT use this\n' +
+  '  delinquentBalance    = TOTALS row "Current" column ONLY (NOT "Net Balance")\n' +
+  '    For 100 units, the Current bucket is typically $0-$10K. If you see $30K+ you read "Net Balance" — go back and find "Current".\n' +
+  '  priorPeriodBalance   = TOTALS row "30 Days" column\n' +
+  '  newDelinquencyThisPeriod = delinquentBalance\n' +
+  '  delinquentCount = Sheet 2 rows where status contains "Current" or "NTV" AND the "Current" aging column > 0\n' +
+  '  topDelinquents: Sheet 2, Current/NTV status only, "Current" aging column > 0, sort by "Current" column descending, top 8\n' +
+  '    Each entry: { unit, name, amount }  ← "amount" = the "Current" aging column value ONLY (NOT Net Balance, NOT total owed across all months)\n' +
+  '    Only include residents whose CURRENT MONTH charges are overdue — skip anyone whose Current column is 0 even if they owe from prior months.\n' +
+  '    Individual current-month balances typically $100-$2,000. If any entry shows $30K+, that is the totals row — remove it.\n\n' +
+
+  'SELF-VALIDATION — check these before returning. Correct any that fail:\n' +
+  '  1. physicalOccupancyPct must be 70-100% for a stabilized property\n' +
+  '     → If 0% or <50%: you misread the status column or counted header rows — fix it\n' +
+  '  2. occupiedCount + occupiedNTVCount + vacantCount must ≈ 100\n' +
+  '     → If far off: you are counting the wrong rows\n' +
+  '  3. gpr must be $90K-$110K for this property\n' +
+  '     → If $0 or $1M+: you read the wrong column\n' +
+  '  4. economicOccupancyPct must be 75-98%\n' +
+  '     → If 0% or >100%: recheck totalLeaseRent and gpr\n' +
+  '  5. delinquentBalance must be < $15K\n' +
+  '     → If > $15K: you read "Net Balance" instead of "Current" aging bucket — find the correct column\n' +
+  '  6. Each topDelinquent amount must be < $10K\n' +
+  '     → If any entry shows $30K+: it is the totals row — do not include it\n\n' +
+  '  Add a brief "sanityNotes" string describing: which source you used for each section,\n' +
+  '  any corrections you made, and any fields genuinely missing from available data.\n' +
+  '  Return 0 for any field you cannot find — do not guess.\n';
 
 function tePromptWithDate() {
-  var today = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd');
-  return TE_METRICS_PROMPT.replace('{{TODAY}}', today);
+  var today  = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd');
+  var month  = Utilities.formatDate(new Date(), 'America/Chicago', 'MMM yyyy'); // e.g. "Apr 2026"
+  return TE_METRICS_PROMPT
+    .replace(/\{\{TODAY\}\}/g, today)
+    .replace(/\{\{TODAY_MONTH\}\}/g, month);
+}
+
+// Normalizes whatever JSON Claude returns to match TowneEastMetrics field names.
+// Handles common alternative field names Claude uses (balance→amount, totalUnits→unitCount, etc.)
+function normalizeTEMetrics(m) {
+  if (!m || typeof m !== 'object') return null;
+
+  // Fix topDelinquents field names: balance/netBalance → amount, bldgUnit → unit
+  if (Array.isArray(m.topDelinquents)) {
+    m.topDelinquents = m.topDelinquents
+      .filter(function(d) { return d && (d.unit || d.bldgUnit) && (d.name || d.residentName); })
+      .map(function(d) {
+        var rawAmt = d.amount !== undefined ? d.amount : (d.balance !== undefined ? d.balance : (d.netBalance || 0));
+        return {
+          unit:   String(d.unit || d.bldgUnit || '').trim(),
+          name:   String(d.name || d.residentName || '').trim(),
+          amount: typeof rawAmt === 'number' ? rawAmt : parseFloat(String(rawAmt).replace(/[$,]/g, '')) || 0,
+        };
+      });
+  }
+  // Fix unitCount alias
+  if (!m.unitCount || m.unitCount === 0) {
+    m.unitCount = m.totalUnits || m.totalUnitsCount || 100;
+  }
+  // Ensure all numeric fields are numbers (Claude sometimes returns strings)
+  var numFields = [
+    'unitCount','occupiedCount','occupiedNTVCount','vacantCount',
+    'physicalOccupancyPct','leasedOccupancyPct','gpr','totalLeaseRent','economicOccupancyPct',
+    'totalCharged','totalCollected','collectionRatePct',
+    'delinquentBalance','priorPeriodBalance','newDelinquencyThisPeriod','delinquentCount',
+    'moveOutsNTVCount','monthToMonthCount','signedLeasesMTD',
+    'expiring30d','expiring60d','expiring90d',
+    'vacantTotalCount','notReadyCount','rentReadyCount','inProcessCount','notStartedCount',
+  ];
+  numFields.forEach(function(f) {
+    if (m[f] !== undefined && typeof m[f] !== 'number') {
+      m[f] = parseFloat(String(m[f]).replace(/[$,]/g, '')) || 0;
+    }
+  });
+  return m;
+}
+
+// Calls Claude with assistant prefill to lock the JSON schema, then normalizes the result.
+function callClaudeTEMetrics(messageContent) {
+  var prefill = '{"asOf":"';
+  try {
+    var resp = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method:  'post',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': CONFIG.CLAUDE_KEY, 'anthropic-version': '2023-06-01' },
+      payload: JSON.stringify({
+        model:      CONFIG.MODEL,
+        max_tokens: 3000,
+        messages: [
+          { role: 'user',      content: messageContent },
+          { role: 'assistant', content: prefill },        // forces our schema
+        ],
+      }),
+      muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) { Logger.log('Claude TE err: ' + resp.getContentText().slice(0, 300)); return null; }
+    var data = JSON.parse(resp.getContentText());
+    var text = data.content.filter(function(c) { return c.type === 'text'; }).map(function(c) { return c.text; }).join('');
+    // Prefill is NOT included in the response text — prepend it to reconstruct valid JSON
+    var fullJson = prefill + text;
+    var m = fullJson.match(/\{[\s\S]*\}/);
+    if (!m) { Logger.log('TE metrics: no JSON in response'); return null; }
+    var parsed = JSON.parse(m[0]);
+    return normalizeTEMetrics(parsed);
+  } catch(e) { Logger.log('Claude TE err: ' + e.message); return null; }
+}
+
+// Validates extracted metrics — only checks sections whose source file was present.
+// sections = { hasOccupancy, hasCollections, hasDelinquency } from uploadTowneEastFromMMR.
+// Pass null to validate everything (e.g. full OneSite XLS bundle).
+function validateTEMetrics(m, sections) {
+  var all = !sections; // null sections = validate everything
+  var warnings = [];
+
+  if (all || sections.hasOccupancy) {
+    if (m.physicalOccupancyPct < 50 || m.physicalOccupancyPct > 100) {
+      warnings.push('OCCUPANCY ' + m.physicalOccupancyPct.toFixed(1) + '% outside 50-100% — likely misread status column');
+    }
+    var countSum = (m.occupiedCount||0) + (m.occupiedNTVCount||0) + (m.vacantCount||0);
+    if (countSum > 0 && Math.abs(countSum - 100) > 8) {
+      warnings.push('UNIT COUNT: ' + m.occupiedCount + '+' + m.occupiedNTVCount + '+' + m.vacantCount + '=' + countSum + ', expected ~100');
+    }
+    if (m.gpr > 0 && (m.gpr < 50000 || m.gpr > 200000)) {
+      warnings.push('GPR $' + m.gpr + ' outside $50K-$200K range for 100 units — likely wrong column');
+    }
+    if (m.gpr > 0 && m.totalLeaseRent > 0) {
+      var econCheck = (m.totalLeaseRent / m.gpr) * 100;
+      if (econCheck > 105 || econCheck < 50) {
+        warnings.push('ECONOMIC OCCUPANCY ' + econCheck.toFixed(1) + '% implausible — recheck totalLeaseRent vs gpr');
+      }
+    }
+  }
+
+  if (all || sections.hasDelinquency) {
+    if (m.delinquentBalance > 15000) {
+      warnings.push('DELINQUENT BALANCE $' + m.delinquentBalance.toFixed(0) + ' > $15K — likely read Net Balance not Current aging bucket');
+    }
+    if (Array.isArray(m.topDelinquents)) {
+      m.topDelinquents.forEach(function(d) {
+        if (d.amount > 10000) warnings.push('TOP DELINQUENT "' + (d.unit||'?') + '" $' + d.amount + ' — over $10K is likely a totals row, not a resident');
+      });
+    }
+  }
+
+  if (all || sections.hasCollections) {
+    if (m.totalCharged > 0 && m.totalCollected > m.totalCharged * 1.1) {
+      warnings.push('COLLECTION RATE > 110% — totalCollected exceeds totalCharged, check source values');
+    }
+  }
+
+  if (warnings.length > 0) {
+    Logger.log('  ⚠ Validation warnings (' + warnings.length + '):');
+    warnings.forEach(function(w) { Logger.log('    • ' + w); });
+  } else {
+    Logger.log('  ✓ Sanity checks passed for present sections');
+  }
+  return warnings;
+}
+
+// Calls Claude, validates, and re-asks with specific corrections if any check fails.
+// sections drives which checks run — pass null to validate everything.
+function callClaudeTEMetricsWithValidation(messageContent, sections) {
+  var metrics = callClaudeTEMetrics(messageContent);
+  if (!metrics) return null;
+
+  var warnings = validateTEMetrics(metrics, sections || null);
+  if (warnings.length > 0) {
+    Logger.log('  → Re-asking Claude to correct ' + warnings.length + ' issue(s)...');
+    var correctionContent = messageContent.concat([{ type: 'text', text:
+      'Your extraction has these financial logic errors — re-examine the source data and correct ONLY the affected fields:\n\n' +
+      warnings.map(function(w, i) { return (i+1) + '. ' + w; }).join('\n') + '\n\n' +
+      'Return the complete corrected JSON. If you cannot find the correct value, return 0 — do not guess.'
+    }]);
+    var corrected = callClaudeTEMetrics(correctionContent);
+    if (corrected) {
+      var remaining = validateTEMetrics(corrected, sections || null);
+      Logger.log('  Correction result: ' + warnings.length + ' warnings → ' + remaining.length + ' remaining');
+      return corrected;
+    }
+    Logger.log('  ✗ Correction call failed — using original despite warnings');
+  }
+  return metrics;
 }
 
 function uploadTowneEastFromMMR(bundle) {
-  Logger.log('  [TE MMR] Extracting metrics from MMR+PDF bundle via Claude...');
-  const msg = [{ type: 'text', text: tePromptWithDate() }];
+  Logger.log('  [TE MMR] Extracting metrics from bundle via Claude...');
 
-  // MMR Excel → convert to CSV so Claude can read it as text
+  // ── Step 1: Inventory what data actually arrived in this email ──────────────
+  // This drives two things:
+  //   (a) We tell Claude exactly which sections to extract vs. return 0 for
+  //   (b) The validation layer only checks sections that have source data
+  var sections = {
+    hasOccupancy:    !!(bundle.rentRoll || bundle.mmr),
+    hasCollections:  !!(bundle.transactionSummary || bundle.monthlyIncomeSummary || bundle.cashGLDistribution),
+    hasDelinquency:  !!(bundle.delinquencyXls || bundle.delinquency),
+    hasLeasing:      !!(bundle.rentRoll || bundle.leasingActivity || bundle.residentActivity),
+  };
+
+  var presentLines = [], absentLines = [];
+  if (bundle.mmr)                  presentLines.push('  ✓ MMR Excel (weekly summary — use for any occupancy/leasing KPIs it contains)');
+  if (bundle.rentRoll)             presentLines.push('  ✓ Rent Roll XLS → EXTRACT: occupancy counts, GPR, lease rent, all leasing/expiration fields');
+  if (bundle.transactionSummary)   presentLines.push('  ✓ Monthly Transaction Summary PDF → EXTRACT: totalCollected, totalCharged, collectionRatePct');
+  if (bundle.monthlyIncomeSummary) presentLines.push('  ✓ Monthly Income Summary XLS → EXTRACT: income totals if Transaction Summary absent');
+  if (bundle.cashGLDistribution)   presentLines.push('  ✓ Cash G/L Distribution XLS');
+  if (bundle.delinquencyXls)       presentLines.push('  ✓ Delinquent & Prepaid XLS → EXTRACT: delinquentBalance (Current column), topDelinquents, delinquentCount');
+  if (bundle.delinquency)          presentLines.push('  ✓ Delinquent & Prepaid PDF → EXTRACT: topDelinquents (use if XLS absent)');
+  if (bundle.leasingActivity)      presentLines.push('  ✓ Leasing Activity PDF → EXTRACT: signed leases, move-ins');
+  if (bundle.residentActivity)     presentLines.push('  ✓ Resident Activity PDF → EXTRACT: move-outs, NTV');
+
+  if (!sections.hasOccupancy)   absentLines.push('  ✗ No Rent Roll — return 0 for: occupiedCount, occupiedNTVCount, vacantCount, physicalOccupancyPct, leasedOccupancyPct, gpr, totalLeaseRent, economicOccupancyPct, signedLeasesMTD, moveOutsNTVCount, monthToMonthCount, expiring30d, expiring60d, expiring90d — return [] for moveOutsThisMonth, leaseStartsThisMonth, leaseExpirationByMonth');
+  if (!sections.hasCollections) absentLines.push('  ✗ No Collections report — return 0 for: totalCollected, totalCharged, collectionRatePct');
+  if (!sections.hasDelinquency) absentLines.push('  ✗ No Delinquency report — return 0 for: delinquentBalance, priorPeriodBalance, newDelinquencyThisPeriod, delinquentCount — return [] for topDelinquents');
+
+  var inventory =
+    'THIS EMAIL CONTAINS:\n' + (presentLines.length ? presentLines.join('\n') : '  (none matched)') +
+    (absentLines.length
+      ? '\n\nNOT IN THIS EMAIL — DO NOT GUESS, DO NOT INFER, RETURN EXACTLY 0 OR []:\n' + absentLines.join('\n')
+      : '') +
+    '\n\nOnly extract metrics from the ✓ sources above. ' +
+    'The dashboard merges this with previous data, so returning 0 for a missing section is correct — ' +
+    'the previous value will be preserved automatically. Never invent a number.';
+
+  Logger.log('  Sections available — occupancy:' + sections.hasOccupancy +
+             ' collections:' + sections.hasCollections +
+             ' delinquency:' + sections.hasDelinquency);
+
+  // ── Step 2: Build message with inventory first, then prompt, then attachments ─
+  const msg = [
+    { type: 'text', text: inventory },
+    { type: 'text', text: tePromptWithDate() },
+  ];
+
   if (bundle.mmr) {
     const csv = xlsxToCsv(attachmentBase64(bundle.mmr), bundle.mmr.getContentType(), bundle.mmr.getName());
     if (csv) msg.push({ type: 'text', text: 'MMR EXCEL (CSV):\n' + csv });
   }
-  // Rent Roll XLS → CSV (occupancy, lease dates, move-outs — use for occupancy/leasing fields)
   if (bundle.rentRoll) {
-    const csv = xlsxToCsv(attachmentBase64(bundle.rentRoll), bundle.rentRoll.getContentType(), bundle.rentRoll.getName());
-    if (csv) msg.push({ type: 'text', text: 'RENT ROLL (CSV — use for occupancy, NTV, leaseEnd, leaseStart, leaseRent, marketRent):\n' + csv });
+    const csv = xlsxRentRollCsv(attachmentBase64(bundle.rentRoll), bundle.rentRoll.getContentType(), bundle.rentRoll.getName());
+    if (csv) msg.push({ type: 'text', text: 'RENT ROLL (CSV):\n' + csv });
     Utilities.sleep(1000);
   }
-  // Monthly Transaction Summary PDF — primary source for collections & delinquency
   if (bundle.transactionSummary) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.transactionSummary) } });
-    msg.push({ type: 'text', text: 'Above: Monthly Transaction Summary — use for totalCollected, totalCharged, gpr. Do NOT use for delinquentBalance (use Delinquent & Prepaid XLS TOTALS row instead).' });
+    msg.push({ type: 'text', text: 'Above: Monthly Transaction Summary — totalCollected, totalCharged. Do NOT use for delinquentBalance.' });
   }
-  // Monthly Income Summary / Cash G/L XLS → CSV
   if (bundle.monthlyIncomeSummary) {
     const csv = xlsxToCsv(attachmentBase64(bundle.monthlyIncomeSummary), bundle.monthlyIncomeSummary.getContentType(), bundle.monthlyIncomeSummary.getName());
     if (csv) msg.push({ type: 'text', text: 'MONTHLY INCOME SUMMARY (CSV):\n' + csv });
   }
   if (bundle.cashGLDistribution) {
     const csv = xlsxToCsv(attachmentBase64(bundle.cashGLDistribution), bundle.cashGLDistribution.getContentType(), bundle.cashGLDistribution.getName());
-    if (csv) msg.push({ type: 'text', text: 'CASH BASIS G/L DISTRIBUTION (CSV):\n' + csv });
+    if (csv) msg.push({ type: 'text', text: 'CASH G/L DISTRIBUTION (CSV):\n' + csv });
   }
-  // Delinquent & Prepaid XLS → CSV (per-unit detail for topDelinquents)
   if (bundle.delinquencyXls) {
-    var delCsv = xlsxToCsv(attachmentBase64(bundle.delinquencyXls), bundle.delinquencyXls.getContentType(), bundle.delinquencyXls.getName());
-    if (delCsv) msg.push({ type: 'text', text: 'DELINQUENT AND PREPAID (CSV — PRIMARY source for all delinquency fields):\n' +
-      'This file has TWO sheets: Sheet1 = per-charge detail rows (find TOTALS row at bottom for aggregate numbers); ' +
-      'Sheet2 = per-resident summary (one row per resident with Net Balance and aging columns already aggregated).\n' +
-      'Use TOTALS row "Current" column for delinquentBalance. Use Sheet2 for topDelinquents and delinquentCount.\n' +
-      'See DELINQUENCY RULES for full details.\n' + delCsv });
+    var delCsv = xlsxDelinquencyCsv(attachmentBase64(bundle.delinquencyXls), bundle.delinquencyXls.getContentType(), bundle.delinquencyXls.getName());
+    if (delCsv) msg.push({ type: 'text', text: 'DELINQUENT AND PREPAID (CSV):\n' +
+      'Sheet 1: header + last rows only — TOTALS row is the final data row.\n' +
+      'Sheet 2: per-resident summary — use for topDelinquents and delinquentCount.\n' +
+      'Use TOTALS row "Current" column (NOT "Net Balance") for delinquentBalance.\n' + delCsv });
     Utilities.sleep(1000);
   }
-  // Delinquent & Prepaid PDF fallback
   if (bundle.delinquency) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.delinquency) } });
-    msg.push({ type: 'text', text: 'Above: Delinquent and Prepaid report (use for topDelinquents unit-level list; use Monthly Transaction Summary totals for delinquentBalance)' });
+    msg.push({ type: 'text', text: 'Above: Delinquent and Prepaid PDF — use for topDelinquents.' });
   }
   if (bundle.leasingActivity) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.leasingActivity) } });
-    msg.push({ type: 'text', text: 'Above: Leasing Activity Detail' });
+    msg.push({ type: 'text', text: 'Above: Leasing Activity Detail.' });
   }
   if (bundle.residentActivity) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.residentActivity) } });
-    msg.push({ type: 'text', text: 'Above: Resident Activity report' });
+    msg.push({ type: 'text', text: 'Above: Resident Activity.' });
   }
 
-  const metrics = callClaudeJson(msg, 2500);
+  // ── Step 3: Extract with section-aware validation ───────────────────────────
+  const metrics = callClaudeTEMetricsWithValidation(msg, sections);
   if (!metrics) { Logger.log('  ✗ TE MMR: Claude extraction failed'); return false; }
 
   const headers = { 'Content-Type': 'application/json' };
@@ -536,6 +747,20 @@ function attachmentToText(att) {
   return null;
 }
 
+function rowsToCsv(rows) {
+  return rows.map(function(row) {
+    return row.map(function(cell) {
+      var s = String(cell === null || cell === undefined ? '' : cell);
+      if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }).join(',');
+  }).join('\n');
+}
+
+// Converts XLS/XLSX to CSV text. Exports ALL sheets (not just the first) using
+// SpreadsheetApp so multi-sheet workbooks like the delinquency report are fully visible.
 function xlsxToCsv(base64Data, mimeType, fileName) {
   try {
     const bytes = Utilities.base64Decode(base64Data);
@@ -544,15 +769,107 @@ function xlsxToCsv(base64Data, mimeType, fileName) {
     const resource = { title: 'aam_tmp_' + Date.now(), mimeType: 'application/vnd.google-apps.spreadsheet' };
     const converted = Drive.Files.copy(resource, file.getId());
     Utilities.sleep(3000);
-    const resp = UrlFetchApp.fetch(
-      'https://docs.google.com/spreadsheets/d/' + converted.id + '/export?format=csv',
-      { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true }
-    );
+    var result = null;
+    try {
+      const ss     = SpreadsheetApp.openById(converted.id);
+      const sheets = ss.getSheets();
+      const parts  = [];
+      for (var i = 0; i < sheets.length; i++) {
+        const data = sheets[i].getDataRange().getValues();
+        if (sheets.length > 1) {
+          parts.push('=== Sheet ' + (i + 1) + ': ' + sheets[i].getName() + ' ===');
+        }
+        parts.push(rowsToCsv(data));
+      }
+      result = parts.join('\n').substring(0, CONFIG.MAX_FILE_CHARS);
+    } catch(e2) {
+      Logger.log('  xlsx→CSV SpreadsheetApp failed, trying URL export: ' + e2.message);
+      try {
+        const resp = UrlFetchApp.fetch(
+          'https://docs.google.com/spreadsheets/d/' + converted.id + '/export?format=csv',
+          { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true }
+        );
+        if (resp.getResponseCode() === 200) result = resp.getContentText().substring(0, CONFIG.MAX_FILE_CHARS);
+      } catch(e3) { Logger.log('  URL export also failed: ' + e3.message); }
+    }
     try { DriveApp.getFileById(file.getId()).setTrashed(true); } catch(e) {}
     try { DriveApp.getFileById(converted.id).setTrashed(true); } catch(e) {}
-    if (resp.getResponseCode() !== 200) return null;
-    return resp.getContentText().substring(0, CONFIG.MAX_FILE_CHARS);
+    return result;
   } catch(e) { Logger.log('  xlsx→CSV error: ' + e.message); return null; }
+}
+
+// Special extractor for the Delinquent & Prepaid XLS.
+// Sheet1 is per-charge detail (potentially large) — we only need the TOTALS row.
+// Sheet2 is per-resident summary — we need all rows.
+// Returns up to 40K chars so Sheet2 is never truncated.
+function xlsxDelinquencyCsv(base64Data, mimeType, fileName) {
+  try {
+    const bytes = Utilities.base64Decode(base64Data);
+    const blob  = Utilities.newBlob(bytes, mimeType, fileName || 'temp.xlsx');
+    const file  = DriveApp.createFile(blob);
+    const resource = { title: 'aam_tmp_' + Date.now(), mimeType: 'application/vnd.google-apps.spreadsheet' };
+    const converted = Drive.Files.copy(resource, file.getId());
+    Utilities.sleep(3000);
+    var result = null;
+    try {
+      const ss     = SpreadsheetApp.openById(converted.id);
+      const sheets = ss.getSheets();
+      const parts  = [];
+      if (sheets.length > 0) {
+        // Sheet1: include header row + last 8 rows (TOTALS is always the final data row)
+        const data1 = sheets[0].getDataRange().getValues();
+        const tail  = data1.length > 9 ? [data1[0]].concat(data1.slice(data1.length - 8)) : data1;
+        parts.push('=== Sheet 1: ' + sheets[0].getName() + ' (header + last rows; TOTALS row is the final row) ===');
+        parts.push(rowsToCsv(tail));
+      }
+      if (sheets.length > 1) {
+        // Sheet2: per-resident summary — include all rows
+        const data2 = sheets[1].getDataRange().getValues();
+        parts.push('=== Sheet 2: ' + sheets[1].getName() + ' (per-resident summary — use for topDelinquents) ===');
+        parts.push(rowsToCsv(data2));
+      }
+      result = parts.join('\n').substring(0, 40000);
+    } catch(e2) {
+      Logger.log('  xlsxDelinquencyCsv failed, falling back to xlsxToCsv: ' + e2.message);
+      result = xlsxToCsv(base64Data, mimeType, fileName);
+    }
+    try { DriveApp.getFileById(file.getId()).setTrashed(true); } catch(e) {}
+    try { DriveApp.getFileById(converted.id).setTrashed(true); } catch(e) {}
+    return result;
+  } catch(e) { Logger.log('  xlsxDelinquencyCsv error: ' + e.message); return null; }
+}
+
+// Rent roll extractor: converts all sheets but limits to 30K chars.
+// For a 100-unit property this is always sufficient.
+function xlsxRentRollCsv(base64Data, mimeType, fileName) {
+  try {
+    const bytes = Utilities.base64Decode(base64Data);
+    const blob  = Utilities.newBlob(bytes, mimeType, fileName || 'temp.xlsx');
+    const file  = DriveApp.createFile(blob);
+    const resource = { title: 'aam_tmp_' + Date.now(), mimeType: 'application/vnd.google-apps.spreadsheet' };
+    const converted = Drive.Files.copy(resource, file.getId());
+    Utilities.sleep(3000);
+    var result = null;
+    try {
+      const ss     = SpreadsheetApp.openById(converted.id);
+      const sheets = ss.getSheets();
+      const parts  = [];
+      for (var i = 0; i < sheets.length; i++) {
+        const data = sheets[i].getDataRange().getValues();
+        if (sheets.length > 1) {
+          parts.push('=== Sheet ' + (i + 1) + ': ' + sheets[i].getName() + ' ===');
+        }
+        parts.push(rowsToCsv(data));
+      }
+      result = parts.join('\n').substring(0, 30000);
+    } catch(e2) {
+      Logger.log('  xlsxRentRollCsv SpreadsheetApp failed: ' + e2.message);
+      result = xlsxToCsv(base64Data, mimeType, fileName);
+    }
+    try { DriveApp.getFileById(file.getId()).setTrashed(true); } catch(e) {}
+    try { DriveApp.getFileById(converted.id).setTrashed(true); } catch(e) {}
+    return result;
+  } catch(e) { Logger.log('  xlsxRentRollCsv error: ' + e.message); return null; }
 }
 
 // ── Renovation tracker (reads Google Sheet directly) ────────
@@ -917,6 +1234,19 @@ function extractSnapshot(plan, body, content) {
     '- physical_occupancy_pct: occupied_units / total_units (0-1 scale)\n' +
     '- projected_occupancy_pct: (occupied − ntv + preleased) / total_units — forward-looking\n' +
     '- economic_occupancy_pct: actual_rent / market_rent — catches loss-to-lease\n' +
+    '  HOW TO FIND THE RIGHT RENT COLUMNS in a rent roll attachment:\n' +
+    '  Market Rent column (for denominator) = highest rent figure per unit, present on every unit including vacant.\n' +
+    '    Common headers: "Market Rent", "Market Rate", "Gross Potential", "Scheduled Rent", "Asking Rent"\n' +
+    '  Actual/Lease Rent column (for numerator) = what the resident signed for, only on occupied units, always ≤ market rent.\n' +
+    '    Common headers: "Contract Rent", "Lease Rent", "Actual Rent", "Resident Rent", "Charge"\n' +
+    '  Training examples:\n' +
+    '  • [Market Rent] [Contract Rent] → market=Market Rent, actual=Contract Rent ✓\n' +
+    '  • [Asking Rent] [Lease Rent]    → market=Asking Rent,  actual=Lease Rent ✓\n' +
+    '  • [Gross Rent]  [Net Rent]      → market=Gross Rent,   actual=Net Rent ✓\n' +
+    '  • [Rent] [Concession] [Charge]  → market=Rent,         actual=Charge ✓\n' +
+    '  • Only one rent column          → set economic_occupancy_pct = physical_occupancy_pct\n' +
+    '  Self-test: pick one occupied unit row — if actual > market for that row, you have them backwards, swap.\n' +
+    '  economic_occupancy_pct = SUM(actual rent, occupied units only) / SUM(market rent, ALL units) — return as 0-1 scale\n' +
     '- loss_to_lease_amt: market_rent_total − actual_rent_total\n' +
     '- vacant_ready_units: vacants move-in ready (not in turn)\n' +
     '- preleased_units: signed leases not yet moved in\n' +

@@ -676,7 +676,7 @@ export default function TowneEastPage() {
               <Card className="border-gray-200"><CardContent className="p-0"><div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200"><tr>
-                    {["Month", "Expiring", "NTV / Vacating", "Month-to-Month"].map((h) => (
+                    {["Month", "Expiring", "NTV / Vacating", "Needs Renewal"].map((h) => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr></thead>
@@ -686,7 +686,7 @@ export default function TowneEastPage() {
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.month}</td>
                         <td className="px-4 py-3 text-sm font-bold text-gray-900">{row.expiring}</td>
                         <td className="px-4 py-3 text-sm">{row.ntv > 0 ? <span className="font-semibold text-red-600">{row.ntv}</span> : <span className="text-gray-300">—</span>}</td>
-                        <td className="px-4 py-3 text-sm">{row.mtm > 0 ? <span className="font-semibold text-amber-600">{row.mtm}</span> : <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-3 text-sm">{row.needsRenewal > 0 ? <span className="font-semibold text-amber-600">{row.needsRenewal}</span> : <span className="text-gray-300">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -694,7 +694,7 @@ export default function TowneEastPage() {
                     <td className="px-4 py-2.5 text-xs font-bold text-gray-600 uppercase">Total (6 mo)</td>
                     <td className="px-4 py-2.5 font-bold text-gray-900">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.expiring, 0)}</td>
                     <td className="px-4 py-2.5 font-bold text-red-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.ntv, 0)}</td>
-                    <td className="px-4 py-2.5 font-bold text-amber-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + r.mtm, 0)}</td>
+                    <td className="px-4 py-2.5 font-bold text-amber-600">{(metrics.leaseExpirationByMonth ?? []).reduce((s, r) => s + (r.needsRenewal ?? 0), 0)}</td>
                   </tr></tfoot>
                 </table>
               </div></CardContent></Card>
