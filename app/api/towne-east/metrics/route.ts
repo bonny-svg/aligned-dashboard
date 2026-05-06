@@ -77,6 +77,14 @@ export async function POST(req: NextRequest) {
       if (v === null || v === undefined) continue;
       if (typeof v === "number" && v === 0 && typeof existing[k] === "number" && (existing[k] as number) !== 0) continue;
       if (Array.isArray(v) && v.length === 0 && Array.isArray(existing[k]) && (existing[k] as unknown[]).length > 0) continue;
+      // leaseExpirationByMonth: don't overwrite good monthly data with all-zero rows.
+      // This happens when a Claude-only run (no rent roll) returns an array with correct
+      // length but every entry has expiring=0, wiping out data from a previous XLS run.
+      if (k === "leaseExpirationByMonth" && Array.isArray(v) && Array.isArray(existing[k])) {
+        const incomingHasData = (v as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
+        const existingHasData = (existing[k] as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
+        if (!incomingHasData && existingHasData) continue;
+      }
       merged[k] = v;
     }
 
