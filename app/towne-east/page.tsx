@@ -544,15 +544,6 @@ export default function TowneEastPage() {
               </div></CardContent></Card>
 
 
-              {/* AI Collections platform data */}
-              {extras?.delinquency && (
-                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <StatCard label="Open Tasks" value={String(extras.delinquency.openTasksCount)} sub={`${fmt(extras.delinquency.openTasksAmount)} at risk · oldest ${extras.delinquency.oldestTaskDays}d`} color={extras.delinquency.openTasksCount > 10 ? "text-amber-600" : "text-gray-900"} />
-                  <StatCard label="Unresponsive" value={String(extras.delinquency.unresponsiveCount)} sub={fmt(extras.delinquency.unresponsiveAmount)} color={extras.delinquency.unresponsiveCount > 0 ? "text-red-600" : "text-gray-900"} />
-                  <StatCard label="Promise to Pay" value={String(extras.delinquency.promiseToPayCount)} sub={fmt(extras.delinquency.promiseToPayAmount)} color="text-amber-600" />
-                  <StatCard label="AI Messages Sent" value={extras.delinquency.aiMessagesSent.toLocaleString()} sub={`${extras.delinquency.hoursSaved}h saved · SMS ${extras.delinquency.smsEngagementRate}% open`} color="text-blue-600" />
-                </div>
-              )}
             </>
           ) : (
             <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">

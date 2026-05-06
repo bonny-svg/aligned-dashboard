@@ -460,26 +460,19 @@ var TE_METRICS_PROMPT =
   '    Healthy collection rate is 85-98%. If totalCollected > totalCharged, you have the wrong values.\n' +
   '  collectionRatePct = totalCollected / totalCharged × 100\n\n' +
 
-  'DELINQUENCY — Two possible source formats; use whichever is present:\n\n' +
-  'FORMAT A: Resident Balances by Fiscal Period PDF (preferred — this is what you will usually receive)\n' +
-  '  Each row = one resident/unit with these key columns:\n' +
-  '    Status | Beginning Delinquent Balance | Beginning Prepaid Balance | Beginning Balance |\n' +
-  '    Total Lease Charges | Total Credits | Ending Delinquent Balance | Ending Prepaid Balance | Ending Balance\n' +
-  '  FILTER: include ONLY rows where Status = "Current resident". Exclude Former resident, Applicant, Miscellaneous Income, etc.\n' +
-  '  delinquentBalance    = SUM of "Ending Delinquent Balance" for Current residents only\n' +
-  '  priorPeriodBalance   = SUM of "Beginning Delinquent Balance" for Current residents only\n' +
-  '  newDelinquencyThisPeriod = max(0, delinquentBalance − priorPeriodBalance)\n' +
-  '  delinquentCount = count of Current residents where Ending Delinquent Balance > 0\n' +
-  '  topDelinquents: Current residents with Ending Delinquent Balance > 0, sorted by that column descending, top 8\n' +
-  '    Each entry: { unit, name, amount } where amount = Ending Delinquent Balance\n' +
-  '    Typical individual balances $200–$4,000. The grand totals row at the bottom shows $30K+ — skip it.\n\n' +
-  'FORMAT B: Delinquent & Prepaid XLS (2 sheets, aging buckets) — use only if no Resident Balances PDF\n' +
-  '  Sheet 2 = per-resident summary — Net Balance | Current | 30 Days | 60 Days | 90+ Days\n' +
-  '  delinquentBalance    = TOTALS row "Current" + "30 Days" + "60 Days" + "90+ Days" (all aging buckets, current residents)\n' +
-  '  priorPeriodBalance   = TOTALS row "30 Days" + "60 Days" + "90+ Days" columns only\n' +
-  '  newDelinquencyThisPeriod = TOTALS row "Current" column only\n' +
-  '  delinquentCount = rows where any aging bucket > 0 and status = Current/NTV\n' +
-  '  topDelinquents: Current/NTV residents, sort by total balance descending, top 8\n\n' +
+  'DELINQUENCY — Delinquent & Prepaid report (PDF or XLS). Already filtered to Current residents only.\n' +
+  '  Columns: Unit | Total Delinquent | Net Balance | Current | 30 Days | 60 Days | 90+ Days\n' +
+  '  Grand Totals row at the end of the report has the summary. Use those for all fields below.\n' +
+  '    "Current" column     = charges from THIS billing cycle not yet paid  → delinquentBalance\n' +
+  '    "30 Days" column     = charges from LAST billing cycle still unpaid  → priorPeriodBalance\n' +
+  '    "60 Days" + "90+ Days" = older delinquency (ignore for the dashboard split, but include in total)\n' +
+  '  delinquentBalance    = Grand Totals "Current" column value\n' +
+  '  priorPeriodBalance   = Grand Totals "30 Days" column value\n' +
+  '  newDelinquencyThisPeriod = delinquentBalance (same as Current)\n' +
+  '  delinquentCount      = count of resident rows with Total Delinquent > 0\n' +
+  '  topDelinquents: residents with Total Delinquent > 0, sort descending, top 8\n' +
+  '    Each entry: { unit, name, amount } where amount = Total Delinquent for that resident\n' +
+  '    Individual balances typically $200–$4,000. Grand Totals row shows $30K+ — skip it.\n\n' +
 
   'SELF-VALIDATION — check these before returning. Correct any that fail:\n' +
   '  1. physicalOccupancyPct must be 70-100% for a stabilized property\n' +
@@ -687,7 +680,7 @@ function uploadTowneEastFromMMR(bundle) {
   if (bundle.monthlyIncomeSummary) presentLines.push('  ✓ Monthly Income Summary XLS → EXTRACT: income totals if Transaction Summary absent');
   if (bundle.cashGLDistribution)   presentLines.push('  ✓ Cash G/L Distribution XLS');
   if (bundle.delinquencyXls)       presentLines.push('  ✓ Delinquent & Prepaid XLS → EXTRACT: delinquentBalance (Current column), topDelinquents, delinquentCount');
-  if (bundle.delinquency)          presentLines.push('  ✓ Resident Balances / Delinquent & Prepaid PDF → EXTRACT: delinquentBalance (Ending Delinquent Balance, current residents), priorPeriodBalance (Beginning Delinquent Balance, current residents), delinquentCount, topDelinquents');
+  if (bundle.delinquency)          presentLines.push('  ✓ Delinquent & Prepaid PDF → EXTRACT: delinquentBalance (Grand Totals "Current" column), priorPeriodBalance (Grand Totals "30 Days" column), delinquentCount, topDelinquents');
   if (bundle.leasingActivity)      presentLines.push('  ✓ Leasing Activity PDF → EXTRACT: signed leases, move-ins');
   if (bundle.residentActivity)     presentLines.push('  ✓ Resident Activity PDF → EXTRACT: move-outs, NTV');
 
@@ -746,7 +739,7 @@ function uploadTowneEastFromMMR(bundle) {
   }
   if (bundle.delinquency) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.delinquency) } });
-    msg.push({ type: 'text', text: 'Above: Resident Balances by Fiscal Period (or Delinquent & Prepaid) PDF.\nIf this is the Resident Balances report: filter to Status="Current resident" rows only. Sum "Ending Delinquent Balance" → delinquentBalance. Sum "Beginning Delinquent Balance" → priorPeriodBalance. The grand totals row at the bottom shows $30K+ — skip it, it is not a resident row.' });
+    msg.push({ type: 'text', text: 'Above: Delinquent and Prepaid PDF (already filtered to Current residents only).\nExtract ALL delinquency fields from the Grand Totals row: delinquentBalance = "Current" column, priorPeriodBalance = "30 Days" column, delinquentCount = resident count with Total Delinquent > 0, topDelinquents = top 8 residents by Total Delinquent. The Grand Totals row shows $30K+ total — do not include it as a resident entry.' });
   }
   if (bundle.leasingActivity) {
     msg.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachmentBase64(bundle.leasingActivity) } });
