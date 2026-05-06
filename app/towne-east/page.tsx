@@ -543,36 +543,7 @@ export default function TowneEastPage() {
                 </table>
               </div></CardContent></Card>
 
-              {(metrics.topDelinquents ?? []).length > 0 && (
-                <Card className="border-gray-200 mt-4"><CardContent className="p-0"><div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b border-gray-200"><tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Resident</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Balance</th>
-                    </tr></thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {(metrics.topDelinquents ?? []).map((d) => (
-                        <tr key={d.unit} className="hover:bg-gray-50/60">
-                          <td className="px-4 py-2 text-sm font-mono font-semibold text-gray-900">{d.unit}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700">{d.name}</td>
-                          <td className="px-4 py-2 text-sm text-right font-medium text-red-600">{fmt(d.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div></CardContent></Card>
-              )}
 
-              {/* AI Collections platform data */}
-              {extras?.delinquency && (
-                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <StatCard label="Open Tasks" value={String(extras.delinquency.openTasksCount)} sub={`${fmt(extras.delinquency.openTasksAmount)} at risk · oldest ${extras.delinquency.oldestTaskDays}d`} color={extras.delinquency.openTasksCount > 10 ? "text-amber-600" : "text-gray-900"} />
-                  <StatCard label="Unresponsive" value={String(extras.delinquency.unresponsiveCount)} sub={fmt(extras.delinquency.unresponsiveAmount)} color={extras.delinquency.unresponsiveCount > 0 ? "text-red-600" : "text-gray-900"} />
-                  <StatCard label="Promise to Pay" value={String(extras.delinquency.promiseToPayCount)} sub={fmt(extras.delinquency.promiseToPayAmount)} color="text-amber-600" />
-                  <StatCard label="AI Messages Sent" value={extras.delinquency.aiMessagesSent.toLocaleString()} sub={`${extras.delinquency.hoursSaved}h saved · SMS ${extras.delinquency.smsEngagementRate}% open`} color="text-blue-600" />
-                </div>
-              )}
             </>
           ) : (
             <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
