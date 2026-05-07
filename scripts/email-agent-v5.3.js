@@ -219,12 +219,14 @@ function uploadTowneEastSnapshot(bundle) {
   var metrics = callClaudeJson(msg, 2500);
   if (!metrics) { Logger.log('  ✗ TE XLS: Claude extraction failed'); return false; }
 
+  // Full XLS bundle always has all three files — all sections present
+  var xls_sections = { hasCollections: true, hasDelinquency: true, hasOccupancy: true, hasLeasing: true };
   var headers = { 'Content-Type': 'application/json' };
   if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
   var resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/metrics', {
     method: 'post',
     headers: headers,
-    payload: JSON.stringify({ metrics: metrics }),
+    payload: JSON.stringify({ metrics: metrics, sections: xls_sections }),
     muteHttpExceptions: true,
   });
   Logger.log('  [TE XLS] Metrics upload: ' + resp.getResponseCode());
@@ -769,15 +771,20 @@ function uploadTowneEastFromMMR(bundle) {
     Logger.log('  ✓ Lease counts set from JS-computed values (mtm=' + jsLeasing.monthToMonthCount + ' exp90=' + jsLeasing.expiring90d + ')');
   }
 
+  // ── Step 5: Upload — pass sections so the route knows which fields were sourced ─
+  // The route uses sections to decide whether a zero value means "not in this email"
+  // (skip it, preserve existing) vs. "we had the report and it really is zero" (write it).
+  // This prevents a rent-roll-only run from zeroing out collection/delinquency data.
   const headers = { 'Content-Type': 'application/json' };
   if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
   const resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/metrics', {
     method: 'post',
     headers: headers,
-    payload: JSON.stringify({ metrics: metrics }),
+    payload: JSON.stringify({ metrics: metrics, sections: sections }),
     muteHttpExceptions: true,
   });
-  Logger.log('  [TE MMR] Metrics upload: ' + resp.getResponseCode());
+  Logger.log('  [TE MMR] Metrics upload: ' + resp.getResponseCode() +
+    ' (collections:' + sections.hasCollections + ' delinquency:' + sections.hasDelinquency + ')');
   if (resp.getResponseCode() >= 300) Logger.log('  TE metrics err: ' + resp.getContentText().slice(0, 300));
   return resp.getResponseCode() < 300;
 }

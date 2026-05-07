@@ -5,10 +5,11 @@ import { useEffect, useState } from 'react';
 interface CapExItem {
   item: string;
   phase: string;
-  proposed: number | null;
   underwriting: number | null;
+  status: string;
   actual: number | null;
   notes: string;
+  monthlySpend: Record<string, number>;
 }
 
 interface CapExPhase {
@@ -18,13 +19,22 @@ interface CapExPhase {
   totalUnderwriting: number;
   totalActual: number | null;
   items: CapExItem[];
+  monthlySpend: Record<string, number>;
   grandTotalUnderwriting: number;
+}
+
+interface MonthlyPoint {
+  month: string;
+  amount: number;
 }
 
 interface CapExData {
   phases: CapExPhase[];
   grandTotalUnderwriting: number;
   grandTotalActual: number | null;
+  grandTotalMonthlySpend: number;
+  monthlySpendSeries: MonthlyPoint[];
+  monthCols: string[];
   lastFetched: string;
 }
 
@@ -43,6 +53,24 @@ function calcVariance(actual: number | null, underwriting: number): { val: numbe
   return { val, display, color };
 }
 
+const STATUS_STYLES: Record<string, string> = {
+  'Complete':      'bg-green-100 text-green-700 border-green-200',
+  'Bid Approved':  'bg-blue-100 text-blue-700 border-blue-200',
+  'Pending Bids':  'bg-amber-100 text-amber-700 border-amber-200',
+  'In Progress':   'bg-purple-100 text-purple-700 border-purple-200',
+  'On Hold':       'bg-gray-100 text-gray-500 border-gray-200',
+};
+
+function StatusBadge({ status }: { status: string }) {
+  if (!status) return <span className="text-gray-300">—</span>;
+  const cls = STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-500 border-gray-200';
+  return (
+    <span className={'text-xs px-2 py-0.5 rounded-full border font-medium ' + cls}>
+      {status}
+    </span>
+  );
+}
+
 const COLOR_MAP: Record<string, { bg: string; border: string; text: string; bar: string; badge: string }> = {
   red:    { bg: 'bg-red-50',    border: 'border-red-200',    text: 'text-red-700',    bar: 'bg-red-400',    badge: 'bg-red-100 text-red-700 border-red-200' },
   blue:   { bg: 'bg-blue-50',   border: 'border-blue-200',   text: 'text-blue-700',   bar: 'bg-blue-500',   badge: 'bg-blue-100 text-blue-700 border-blue-200' },
@@ -51,7 +79,42 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; bar:
   gray:   { bg: 'bg-gray-50',   border: 'border-gray-200',   text: 'text-gray-600',   bar: 'bg-gray-400',   badge: 'bg-gray-100 text-gray-600 border-gray-200' },
 };
 
-function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: boolean }) {
+function MonthlySpendChart({ series }: { series: MonthlyPoint[] }) {
+  if (!series.length) return null;
+  const max = Math.max(...series.map(s => s.amount));
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="text-xs font-semibold text-gray-600 mb-4">Monthly Spend</div>
+      <div className="flex items-end gap-2 h-28">
+        {series.map(({ month, amount }) => {
+          const pct = max > 0 ? (amount / max) * 100 : 0;
+          return (
+            <div key={month} className="flex-1 flex flex-col items-center gap-1">
+              <span className="text-xs text-gray-500 font-medium">{fmt(amount)}</span>
+              <div className="w-full flex items-end" style={{ height: '72px' }}>
+                <div
+                  className="w-full rounded-t bg-blue-500 transition-all"
+                  style={{ height: pct + '%', minHeight: amount > 0 ? '4px' : '0' }}
+                />
+              </div>
+              <span className="text-xs text-gray-400">{month}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PhaseSection({
+  phase,
+  defaultOpen,
+  monthCols,
+}: {
+  phase: CapExPhase;
+  defaultOpen: boolean;
+  monthCols: string[];
+}) {
   const [open, setOpen] = useState(defaultOpen);
   const c = COLOR_MAP[phase.color] || COLOR_MAP.gray;
   const v = calcVariance(phase.totalActual, phase.totalUnderwriting);
@@ -59,17 +122,29 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
     ? (phase.totalUnderwriting / phase.grandTotalUnderwriting) * 100
     : 0;
 
+  // Count by status
+  const statusCounts: Record<string, number> = {};
+  for (const item of phase.items) {
+    if (item.status) statusCounts[item.status] = (statusCounts[item.status] ?? 0) + 1;
+  }
+  const completedCount = statusCounts['Complete'] ?? 0;
+
   return (
     <div className={'rounded-xl border ' + c.border + ' overflow-hidden'}>
       <button
         onClick={function() { setOpen(!open); }}
         className={'w-full flex items-center justify-between px-4 py-3 ' + c.bg + ' hover:opacity-90 transition-opacity'}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className={'text-sm font-bold ' + c.text}>{phase.label}</span>
           <span className={'text-xs px-2 py-0.5 rounded-full border font-medium ' + c.badge}>
             {phase.items.length} items
           </span>
+          {completedCount > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-green-100 text-green-700 border-green-200">
+              {completedCount} complete
+            </span>
+          )}
           <span className="text-xs text-gray-400">{pct.toFixed(0)}% of budget</span>
         </div>
         <div className="flex items-center gap-4">
@@ -96,9 +171,13 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
             <thead>
               <tr className="text-xs text-gray-400 uppercase border-b border-gray-100 bg-white">
                 <th className="text-left px-4 py-2">Item</th>
+                <th className="text-left px-4 py-2">Status</th>
                 <th className="text-right px-4 py-2">Underwriting</th>
                 <th className="text-right px-4 py-2">Actual</th>
                 <th className="text-right px-4 py-2">Variance</th>
+                {monthCols.map(m => (
+                  <th key={m} className="text-right px-3 py-2">{m}</th>
+                ))}
                 <th className="text-left px-4 py-2">Notes</th>
               </tr>
             </thead>
@@ -108,6 +187,9 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
                 return (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className="px-4 py-2.5 font-medium text-gray-800">{item.item}</td>
+                    <td className="px-4 py-2.5">
+                      <StatusBadge status={item.status} />
+                    </td>
                     <td className="px-4 py-2.5 text-right text-gray-600">
                       {item.underwriting !== null ? fmt(item.underwriting) : '—'}
                     </td>
@@ -117,6 +199,11 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
                     <td className={'px-4 py-2.5 text-right font-medium ' + (iv ? iv.color : 'text-gray-300')}>
                       {iv ? iv.display : '—'}
                     </td>
+                    {monthCols.map(m => (
+                      <td key={m} className="px-3 py-2.5 text-right text-gray-600 text-xs">
+                        {item.monthlySpend[m] ? fmt(item.monthlySpend[m]) : '—'}
+                      </td>
+                    ))}
                     <td className="px-4 py-2.5 text-xs text-gray-400 max-w-xs">{item.notes || '—'}</td>
                   </tr>
                 );
@@ -125,6 +212,7 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
             <tfoot className={'border-t-2 ' + c.border}>
               <tr className={c.bg}>
                 <td className={'px-4 py-2.5 text-sm font-bold ' + c.text}>Subtotal</td>
+                <td />
                 <td className={'px-4 py-2.5 text-right text-sm font-bold ' + c.text}>
                   {fmt(phase.totalUnderwriting)}
                 </td>
@@ -134,6 +222,11 @@ function PhaseSection({ phase, defaultOpen }: { phase: CapExPhase; defaultOpen: 
                 <td className={'px-4 py-2.5 text-right text-sm font-bold ' + (v ? v.color : 'text-gray-300')}>
                   {v ? v.display : '—'}
                 </td>
+                {monthCols.map(m => (
+                  <td key={m} className={'px-3 py-2.5 text-right text-xs font-bold ' + c.text}>
+                    {phase.monthlySpend[m] ? fmt(phase.monthlySpend[m]) : '—'}
+                  </td>
+                ))}
                 <td />
               </tr>
             </tfoot>
@@ -185,29 +278,76 @@ export default function CapExSection() {
 
   const v = calcVariance(data.grandTotalActual, data.grandTotalUnderwriting);
 
+  // Status counts across all items
+  const allItems = data.phases.flatMap(p => p.items);
+  const totalComplete   = allItems.filter(i => i.status === 'Complete').length;
+  const totalBidApproved = allItems.filter(i => i.status === 'Bid Approved').length;
+  const totalPending    = allItems.filter(i => i.status === 'Pending Bids').length;
+
   return (
     <div className="space-y-6">
 
       {/* Summary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="text-xs text-gray-500 mb-1">Total Underwriting Budget</div>
+          <div className="text-xs text-gray-500 mb-1">Total Budget</div>
           <div className="text-2xl font-bold text-gray-900">{fmt(data.grandTotalUnderwriting)}</div>
+          <div className="text-xs text-gray-400 mt-1">Underwriting</div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="text-xs text-gray-500 mb-1">Total Actual Spent</div>
           <div className="text-2xl font-bold text-blue-600">
             {data.grandTotalActual !== null ? fmt(data.grandTotalActual) : '—'}
           </div>
-          <div className="text-xs text-gray-400 mt-1">Updates as you enter actuals in sheet</div>
+          <div className="text-xs text-gray-400 mt-1">Committed bids</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="text-xs text-gray-500 mb-1">Monthly Spend</div>
+          <div className="text-2xl font-bold text-indigo-600">
+            {data.grandTotalMonthlySpend > 0 ? fmt(data.grandTotalMonthlySpend) : '—'}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">
+            {data.monthCols.length > 0 ? data.monthCols.join(' + ') : 'No months yet'}
+          </div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="text-xs text-gray-500 mb-1">Variance</div>
           <div className={'text-2xl font-bold ' + (v ? v.color : 'text-gray-300')}>
             {v ? v.display : '—'}
           </div>
+          <div className="text-xs text-gray-400 mt-1">vs underwriting</div>
         </div>
       </div>
+
+      {/* Status Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-green-200 bg-green-50 p-3 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold text-sm">{totalComplete}</div>
+          <div>
+            <div className="text-xs font-semibold text-green-700">Complete</div>
+            <div className="text-xs text-green-600">items finished</div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm">{totalBidApproved}</div>
+          <div>
+            <div className="text-xs font-semibold text-blue-700">Bid Approved</div>
+            <div className="text-xs text-blue-600">in progress</div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-bold text-sm">{totalPending}</div>
+          <div>
+            <div className="text-xs font-semibold text-amber-700">Pending Bids</div>
+            <div className="text-xs text-amber-600">awaiting bids</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Monthly Spend Chart */}
+      {data.monthlySpendSeries.length > 0 && (
+        <MonthlySpendChart series={data.monthlySpendSeries} />
+      )}
 
       {/* Budget Allocation Bar */}
       <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -250,6 +390,7 @@ export default function CapExSection() {
               key={phase.phase}
               phase={phase}
               defaultOpen={i < 2}
+              monthCols={data.monthCols}
             />
           );
         })}
@@ -267,6 +408,12 @@ export default function CapExSection() {
             <div className="text-right">
               <div className="text-xl font-bold text-blue-400">{fmt(data.grandTotalActual)}</div>
               <div className="text-xs text-gray-400">actual</div>
+            </div>
+          )}
+          {data.grandTotalMonthlySpend > 0 && (
+            <div className="text-right">
+              <div className="text-xl font-bold text-indigo-400">{fmt(data.grandTotalMonthlySpend)}</div>
+              <div className="text-xs text-gray-400">monthly spend</div>
             </div>
           )}
           {v && (
