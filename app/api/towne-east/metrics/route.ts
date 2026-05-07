@@ -70,17 +70,23 @@ export async function POST(req: NextRequest) {
     } catch { /* no existing blob — start fresh */ }
 
     const incoming = metrics as Record<string, unknown>;
-    const merged: Record<string, unknown> = { ...existing };
+
+    // If the incoming data is from a different calendar month than what's stored,
+    // start completely fresh — don't carry April numbers into May.
+    const existingMonth = typeof existing.asOf === "string" ? existing.asOf.substring(0, 7) : null;
+    const incomingMonth = typeof incoming.asOf === "string" ? incoming.asOf.substring(0, 7) : null;
+    const newMonth = existingMonth && incomingMonth && existingMonth !== incomingMonth;
+
+    const merged: Record<string, unknown> = newMonth ? {} : { ...existing };
     for (const [k, v] of Object.entries(incoming)) {
       // Keep incoming value if it's a non-zero number, non-empty array, or non-empty string.
       // Fall back to existing value if incoming is 0 / null / undefined / empty array.
+      // (Skip these checks on a new month — always take the incoming value.)
       if (v === null || v === undefined) continue;
-      if (typeof v === "number" && v === 0 && typeof existing[k] === "number" && (existing[k] as number) !== 0) continue;
-      if (Array.isArray(v) && v.length === 0 && Array.isArray(existing[k]) && (existing[k] as unknown[]).length > 0) continue;
+      if (!newMonth && typeof v === "number" && v === 0 && typeof existing[k] === "number" && (existing[k] as number) !== 0) continue;
+      if (!newMonth && Array.isArray(v) && v.length === 0 && Array.isArray(existing[k]) && (existing[k] as unknown[]).length > 0) continue;
       // leaseExpirationByMonth: don't overwrite good monthly data with all-zero rows.
-      // This happens when a Claude-only run (no rent roll) returns an array with correct
-      // length but every entry has expiring=0, wiping out data from a previous XLS run.
-      if (k === "leaseExpirationByMonth" && Array.isArray(v) && Array.isArray(existing[k])) {
+      if (!newMonth && k === "leaseExpirationByMonth" && Array.isArray(v) && Array.isArray(existing[k])) {
         const incomingHasData = (v as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
         const existingHasData = (existing[k] as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
         if (!incomingHasData && existingHasData) continue;
