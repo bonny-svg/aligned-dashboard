@@ -2,8 +2,17 @@
 // Writes directly to towne-east/latest/metrics.json so the dashboard can read it
 // without needing the three OneSite XLS files.
 //
-// POST: application/json { metrics: TowneEastMetrics }
+// POST: application/json { metrics: TowneEastMetrics, sections?: { hasCollections, hasDelinquency, hasOccupancy } }
 // Protected by x-upload-key (same env var as the snapshot endpoint)
+//
+// MERGE RULES:
+//   • New month (asOf year-month changes): wipe blob, start fresh
+//   • Same month, sections.hasCollections=true:  write collection fields even if 0
+//   • Same month, sections.hasCollections=false: SKIP collection fields that are 0/empty
+//                 (preserves good data when a rent-roll-only run has no financial PDFs)
+//   • Same for sections.hasDelinquency
+//   • Occupancy/leasing fields: always skip zeros (protect rent roll data across partial runs)
+//   • leaseExpirationByMonth: only overwrite if incoming has any expiring > 0
 
 import { NextRequest, NextResponse } from "next/server";
 import { put, list } from "@vercel/blob";
@@ -27,6 +36,11 @@ async function putAdaptive(path: string, body: Buffer, contentType: string) {
   }
 }
 
+function yearMonth(asOf: unknown): string | null {
+  if (typeof asOf === "string" && asOf.length >= 7) return asOf.slice(0, 7);
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     return NextResponse.json({ error: "Blob not configured." }, { status: 500 });
@@ -39,9 +53,12 @@ export async function POST(req: NextRequest) {
   }
 
   let metrics: unknown;
+  let sections: { hasCollections?: boolean; hasDelinquency?: boolean; hasOccupancy?: boolean; hasLeasing?: boolean } = {};
+
   try {
-    const body = await req.json() as { metrics?: unknown };
-    metrics = body.metrics;
+    const body = await req.json() as { metrics?: unknown; sections?: typeof sections };
+    metrics  = body.metrics;
+    sections = body.sections ?? {};
     if (!metrics || typeof metrics !== "object") {
       return NextResponse.json({ error: "Body must be { metrics: {...} }" }, { status: 400 });
     }
@@ -50,9 +67,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Merge with existing metrics so an MMR-only run doesn't zero out
-    // occupancy/leasing data that was set by a full OneSite XLS run.
-    // Fields are only overwritten when the incoming value is non-zero / non-empty.
+    // ── Load existing blob ──────────────────────────────────────────────────────
     let existing: Record<string, unknown> = {};
     try {
       const { blobs } = await list({ prefix: "towne-east/latest/" });
@@ -71,38 +86,76 @@ export async function POST(req: NextRequest) {
 
     const incoming = metrics as Record<string, unknown>;
 
-    // Fields that come from the weekly financial reports (Transaction Summary,
-    // Delinquency). These are always authoritative — never preserve a stale value
-    // from a prior month. If the agent didn't have the report this run, 0 is correct.
-    const ALWAYS_OVERWRITE = new Set([
-      "totalCharged", "totalCollected", "collectionRatePct",
-      "delinquentBalance", "priorPeriodBalance", "newDelinquencyThisPeriod", "delinquentCount",
-      "topDelinquents", "asOf", "uploadedAt",
+    // ── Month-rollover detection ────────────────────────────────────────────────
+    // If the report's month changed (e.g. April → May), wipe the blob so stale
+    // April numbers don't bleed into May. A fresh month always starts from scratch.
+    const existingMonth = yearMonth(existing.asOf);
+    const incomingMonth = yearMonth(incoming.asOf);
+    const newMonth = existingMonth !== null && incomingMonth !== null && existingMonth !== incomingMonth;
+
+    if (newMonth) {
+      console.log(`[towne-east/metrics] Month rollover ${existingMonth} → ${incomingMonth}: starting fresh`);
+    }
+
+    // Start from existing data, or empty if month rolled over
+    const merged: Record<string, unknown> = newMonth ? {} : { ...existing };
+
+    // ── Field sets for merge logic ──────────────────────────────────────────────
+    // Always write — these are timestamps/reference points, not financial values
+    const ALWAYS_WRITE = new Set(["asOf", "uploadedAt"]);
+
+    // Collection fields: only write when the agent had the Transaction Summary.
+    // If hasCollections=false (rent-roll-only run), a 0 means "not in this email"
+    // — skip it so the previous good value is preserved.
+    const COLLECTION_FIELDS = new Set(["totalCharged", "totalCollected", "collectionRatePct"]);
+
+    // Delinquency fields: same logic — only write when agent had the delinquency report.
+    const DELINQUENCY_FIELDS = new Set([
+      "delinquentBalance", "priorPeriodBalance", "newDelinquencyThisPeriod",
+      "delinquentCount", "topDelinquents",
     ]);
 
-    // Fields from the rent roll that benefit from merge (not in every email).
-    // Only preserve these from existing if the incoming value is zero/empty.
-    const merged: Record<string, unknown> = { ...existing };
+    // ── Merge loop ──────────────────────────────────────────────────────────────
     for (const [k, v] of Object.entries(incoming)) {
       if (v === null || v === undefined) continue;
-      // Financial/delinquency fields: always write, even if 0
-      if (ALWAYS_OVERWRITE.has(k)) { merged[k] = v; continue; }
-      // Occupancy/leasing fields: skip zeros to preserve rent-roll data across emails
+
+      // Timestamps: always write
+      if (ALWAYS_WRITE.has(k)) { merged[k] = v; continue; }
+
+      // Collection fields: write only if we had the source report, OR the value is non-zero
+      if (COLLECTION_FIELDS.has(k)) {
+        const isZero = (typeof v === "number" && v === 0) || (Array.isArray(v) && v.length === 0);
+        if (isZero && !sections.hasCollections) continue; // skip — not in this email
+        merged[k] = v;
+        continue;
+      }
+
+      // Delinquency fields: write only if we had the source report, OR the value is non-zero
+      if (DELINQUENCY_FIELDS.has(k)) {
+        const isZero = (typeof v === "number" && v === 0) || (Array.isArray(v) && v.length === 0);
+        if (isZero && !sections.hasDelinquency) continue; // skip — not in this email
+        merged[k] = v;
+        continue;
+      }
+
+      // Occupancy / leasing fields: skip zeros so rent-roll data survives across partial runs
       if (typeof v === "number" && v === 0 && typeof existing[k] === "number" && (existing[k] as number) !== 0) continue;
       if (Array.isArray(v) && v.length === 0 && Array.isArray(existing[k]) && (existing[k] as unknown[]).length > 0) continue;
-      // leaseExpirationByMonth: don't overwrite good data with all-zero rows
+
+      // leaseExpirationByMonth: don't overwrite real data with an all-zero array
       if (k === "leaseExpirationByMonth" && Array.isArray(v) && Array.isArray(existing[k])) {
         const incomingHasData = (v as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
-        const existingHasData = (existing[k] as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
+        const existingHasData  = (existing[k] as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
         if (!incomingHasData && existingHasData) continue;
       }
+
       merged[k] = v;
     }
 
     const uploadedAt = new Date().toISOString();
     const payload    = JSON.stringify({ uploadedAt, metrics: merged });
     await putAdaptive(METRICS_PATH, Buffer.from(payload), "application/json");
-    return NextResponse.json({ uploadedAt, source: "mmr-pdf" });
+    return NextResponse.json({ uploadedAt, source: "mmr-pdf", newMonth });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Blob write failed." },
