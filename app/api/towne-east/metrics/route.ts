@@ -71,22 +71,27 @@ export async function POST(req: NextRequest) {
 
     const incoming = metrics as Record<string, unknown>;
 
-    // If the incoming data is from a different calendar month than what's stored,
-    // start completely fresh — don't carry April numbers into May.
-    const existingMonth = typeof existing.asOf === "string" ? existing.asOf.substring(0, 7) : null;
-    const incomingMonth = typeof incoming.asOf === "string" ? incoming.asOf.substring(0, 7) : null;
-    const newMonth = existingMonth && incomingMonth && existingMonth !== incomingMonth;
+    // Fields that come from the weekly financial reports (Transaction Summary,
+    // Delinquency). These are always authoritative — never preserve a stale value
+    // from a prior month. If the agent didn't have the report this run, 0 is correct.
+    const ALWAYS_OVERWRITE = new Set([
+      "totalCharged", "totalCollected", "collectionRatePct",
+      "delinquentBalance", "priorPeriodBalance", "newDelinquencyThisPeriod", "delinquentCount",
+      "topDelinquents", "asOf", "uploadedAt",
+    ]);
 
-    const merged: Record<string, unknown> = newMonth ? {} : { ...existing };
+    // Fields from the rent roll that benefit from merge (not in every email).
+    // Only preserve these from existing if the incoming value is zero/empty.
+    const merged: Record<string, unknown> = { ...existing };
     for (const [k, v] of Object.entries(incoming)) {
-      // Keep incoming value if it's a non-zero number, non-empty array, or non-empty string.
-      // Fall back to existing value if incoming is 0 / null / undefined / empty array.
-      // (Skip these checks on a new month — always take the incoming value.)
       if (v === null || v === undefined) continue;
-      if (!newMonth && typeof v === "number" && v === 0 && typeof existing[k] === "number" && (existing[k] as number) !== 0) continue;
-      if (!newMonth && Array.isArray(v) && v.length === 0 && Array.isArray(existing[k]) && (existing[k] as unknown[]).length > 0) continue;
-      // leaseExpirationByMonth: don't overwrite good monthly data with all-zero rows.
-      if (!newMonth && k === "leaseExpirationByMonth" && Array.isArray(v) && Array.isArray(existing[k])) {
+      // Financial/delinquency fields: always write, even if 0
+      if (ALWAYS_OVERWRITE.has(k)) { merged[k] = v; continue; }
+      // Occupancy/leasing fields: skip zeros to preserve rent-roll data across emails
+      if (typeof v === "number" && v === 0 && typeof existing[k] === "number" && (existing[k] as number) !== 0) continue;
+      if (Array.isArray(v) && v.length === 0 && Array.isArray(existing[k]) && (existing[k] as unknown[]).length > 0) continue;
+      // leaseExpirationByMonth: don't overwrite good data with all-zero rows
+      if (k === "leaseExpirationByMonth" && Array.isArray(v) && Array.isArray(existing[k])) {
         const incomingHasData = (v as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
         const existingHasData = (existing[k] as {expiring?: number}[]).some((e) => (e.expiring ?? 0) > 0);
         if (!incomingHasData && existingHasData) continue;
