@@ -132,23 +132,23 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
 const INCOME: Record<Month, FinRow[]> = {
   apr: [
     { label: "Gross Potential Rent",  actual: 106_100, budget: 105_000 },
-    { label: "Loss / Gain to Leases", actual:  -1_690, budget:  -4_700 },
-    { label: "Vacancy Loss",          actual:  -7_460, budget:  -5_300 },
+    { label: "Loss / Gain to Leases", actual:  -1_690, budget:  -5_376 },
+    { label: "Vacancy Loss",          actual:  -7_460, budget:  -5_250 },
     { label: "Write-Offs / Bad Debt", actual:  21_362, budget:  -1_992 },
-    { label: "Other Revenue",         actual:  14_720, budget:   7_400 },
+    { label: "Other Revenue",         actual:  14_720, budget:   8_900 },
   ],
 };
 
 const EXPENSES: Record<Month, FinRow[]> = {
   apr: [
     { label: "Personnel",             actual:   6_310, budget: 12_514 },
-    { label: "Management Fees",       actual:   2_469, budget:  3_142 },
-    { label: "Administrative",        actual:   4_757, budget:  2_284 },
-    { label: "Leasing",               actual:     796, budget:  2_346 },
-    { label: "Utilities",             actual:   5_983, budget:  2_309 },
-    { label: "Services",              actual:  10_129, budget:     42 },
-    { label: "Cleaning & Decorating", actual:       0, budget:    975 },
-    { label: "Repairs & Maintenance", actual:       0, budget:  2_115 },
+    { label: "Management Fees",       actual:   2_469, budget:  3_038 },
+    { label: "Administrative",        actual:   4_757, budget:  1_928 },
+    { label: "Leasing",               actual:     796, budget:    697 },
+    { label: "Utilities",             actual:   5_983, budget:  3_742 },
+    { label: "Services",              actual:  10_129, budget:    357 },
+    { label: "Cleaning & Decorating", actual:       0, budget:    510 },
+    { label: "Repairs & Maintenance", actual:       0, budget:  1_615 },
     { label: "Property Taxes",        actual:   5_600, budget:  7_833 },
     { label: "Property Insurance",    actual:   4_007, budget:  4_867 },
   ],
@@ -157,7 +157,7 @@ const EXPENSES: Record<Month, FinRow[]> = {
 const BELOW_LINE: Record<Month, FinRow[]> = {
   apr: [
     { label: "Debt Service – Principal & Interest", actual:      0, budget: 25_361 },
-    { label: "Replacement Reserves",               actual:  1_327, budget:  2_802 },
+    { label: "Replacement Reserves",               actual:  1_327, budget:  1_276 },
   ],
 };
 
