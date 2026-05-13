@@ -84,7 +84,7 @@ interface TowneEastExtras {
 }
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-type Month = "mar";
+type Month = "apr";
 
 interface FinRow {
   label: string;
@@ -123,41 +123,46 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
   );
 }
 
-// ─── HARDCODED FINANCIALS — March 2026 (partial month, acquired 3/16/2026) ───
+// ─── HARDCODED FINANCIALS ────────────────────────────────────────────────────
+// Apr 2026: first full month — sourced from Sunridge Income Statement 4/30/2026.
+//   Management Fees actual reflects the $2,469 PM fee from the Sunridge invoice
+//   that was not accrued on the underlying income statement.
+//   "Write-Offs / Bad Debt" actual is positive due to a one-time $20,427 seller
+//   refund at acquisition (Tenant Balances Changes) plus $1,033 bad-debt recovery.
 const INCOME: Record<Month, FinRow[]> = {
-  mar: [
-    { label: "Gross Potential Rent",  actual:  46_076, budget: 109_000 },
-    { label: "Loss / Gain to Leases", actual:       0, budget:  -4_850 },
-    { label: "Vacancy Loss",          actual:       0, budget:  -5_450 },
-    { label: "Write-Offs / Bad Debt", actual:       0, budget:  -1_562 },
-    { label: "Other Revenue",         actual:       0, budget:   7_600 },
+  apr: [
+    { label: "Gross Potential Rent",  actual: 106_100, budget: 105_000 },
+    { label: "Loss / Gain to Leases", actual:  -1_690, budget:  -4_700 },
+    { label: "Vacancy Loss",          actual:  -7_460, budget:  -5_300 },
+    { label: "Write-Offs / Bad Debt", actual:  21_362, budget:  -1_992 },
+    { label: "Other Revenue",         actual:  14_720, budget:   7_400 },
   ],
 };
 
 const EXPENSES: Record<Month, FinRow[]> = {
-  mar: [
-    { label: "Personnel",             actual:       0, budget: 12_514 },
-    { label: "Management Fees",       actual:       0, budget:  3_142 },
-    { label: "Administrative",        actual:       0, budget:  2_284 },
-    { label: "Leasing",               actual:      22, budget:  2_346 },
-    { label: "Utilities",             actual:      10, budget:  2_309 },
-    { label: "Services",              actual:       0, budget:     42 },
+  apr: [
+    { label: "Personnel",             actual:   6_310, budget: 12_514 },
+    { label: "Management Fees",       actual:   2_469, budget:  3_142 },
+    { label: "Administrative",        actual:   4_757, budget:  2_284 },
+    { label: "Leasing",               actual:     796, budget:  2_346 },
+    { label: "Utilities",             actual:   5_983, budget:  2_309 },
+    { label: "Services",              actual:  10_129, budget:     42 },
     { label: "Cleaning & Decorating", actual:       0, budget:    975 },
     { label: "Repairs & Maintenance", actual:       0, budget:  2_115 },
-    { label: "Property Taxes",        actual:   3_190, budget:  7_833 },
-    { label: "Property Insurance",    actual:   4_010, budget:  4_867 },
+    { label: "Property Taxes",        actual:   5_600, budget:  7_833 },
+    { label: "Property Insurance",    actual:   4_007, budget:  4_867 },
   ],
 };
 
 const BELOW_LINE: Record<Month, FinRow[]> = {
-  mar: [
-    { label: "Debt Service – Principal & Interest", actual: 14_433, budget: 25_361 },
-    { label: "Replacement Reserves",               actual:      0, budget:  2_802 },
+  apr: [
+    { label: "Debt Service – Principal & Interest", actual:      0, budget: 25_361 },
+    { label: "Replacement Reserves",               actual:  1_327, budget:  2_802 },
   ],
 };
 
 const OCCUPANCY: Record<Month, { actual: number; budget: number }> = {
-  mar: { actual: 96.0, budget: 95.0 },
+  apr: { actual: 91.0, budget: 95.0 },
 };
 
 // ─── MONTHLY BUDGET (T12 Budget 2025, fiscal Apr 2025 – Mar 2026) ─────────────
@@ -328,7 +333,7 @@ function BudgetCard({
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TowneEastPage() {
-  const [month] = useState<Month>("mar");
+  const [month] = useState<Month>("apr");
   const [metrics, setMetrics]         = useState<TowneEastMetrics | null>(null);
   const [extras, setExtras]           = useState<TowneEastExtras | null>(null);
   const [syncStatus, setSyncStatus]   = useState<"loading" | "idle" | "error">("loading");
@@ -433,7 +438,7 @@ export default function TowneEastPage() {
               <div className="flex flex-wrap items-center gap-4 mt-1 text-xs text-gray-500">
                 <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />Converse, TX</span>
                 <span className="flex items-center gap-1"><Home className="h-3.5 w-3.5" />100 units · Freddie Mac</span>
-                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Financials as of Mar 31, 2026</span>
+                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Financials as of Apr 30, 2026</span>
               </div>
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -556,11 +561,11 @@ export default function TowneEastPage() {
         <section id="financials" className="scroll-mt-28">
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-900">Financials — Actuals vs. Budget</h2>
-            <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-1">Updated monthly — last report: March 2026</span>
+            <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-1">Updated monthly — last report: April 2026</span>
           </div>
           <div className="flex items-center gap-4 border-b border-gray-200 mb-5">
-            <button className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600">Mar 2026</button>
-            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">Partial month — acquired 3/16/2026</span>
+            <button className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600">Apr 2026</button>
+            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">First full month · PM fee accrual added back</span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
