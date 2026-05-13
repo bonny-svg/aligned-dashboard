@@ -161,10 +161,6 @@ const BELOW_LINE: Record<Month, FinRow[]> = {
   ],
 };
 
-const OCCUPANCY: Record<Month, { actual: number; budget: number }> = {
-  apr: { actual: 91.0, budget: 95.0 },
-};
-
 // ─── MONTHLY BUDGET (T12 Budget 2025, fiscal Apr 2025 – Mar 2026) ─────────────
 // Keyed by calendar month (1 = Jan … 12 = Dec). April 2026 uses April 2025 numbers.
 const TE_BUDGET: Record<number, { gpr: number; netRental: number; badDebt: number; physOcc: number; econOcc: number }> = {
@@ -410,8 +406,6 @@ export default function TowneEastPage() {
   const noi = { actual: egi.actual - expensesSum.actual, budget: egi.budget - expensesSum.budget };
   const ncf = { actual: noi.actual - belowLineSum.actual, budget: noi.budget - belowLineSum.budget };
 
-  const occupancy = OCCUPANCY[month];
-
   const debtServiceActual = belowLine
     .filter((r) => r.label.toLowerCase().includes("debt service"))
     .reduce((s, r) => s + r.actual, 0);
@@ -568,13 +562,7 @@ export default function TowneEastPage() {
             <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">First full month · PM fee accrual added back</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
-            <Card className="border-gray-200"><CardContent className="pt-4 pb-3">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Occupancy</p>
-              <p className={cn("text-2xl font-bold mt-1", occupancy.actual >= occupancy.budget ? "text-emerald-600" : "text-amber-600")}>{occupancy.actual.toFixed(1)}%</p>
-              <p className="text-xs text-gray-400 mt-1.5">Bgt {occupancy.budget.toFixed(1)}%</p>
-              <p className={cn("text-xs font-semibold mt-0.5", (occupancy.actual - occupancy.budget) >= 0 ? "text-emerald-600" : "text-red-500")}>{(occupancy.actual - occupancy.budget) >= 0 ? "+" : ""}{(occupancy.actual - occupancy.budget).toFixed(1)}pp</p>
-            </CardContent></Card>
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <Card className="border-gray-200"><CardContent className="pt-4 pb-3">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NOI</p>
               <p className={cn("text-2xl font-bold mt-1", noi.actual >= 0 ? "text-gray-900" : "text-red-600")}>{fmt(noi.actual)}</p>
