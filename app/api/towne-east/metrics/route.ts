@@ -37,8 +37,15 @@ async function putAdaptive(path: string, body: Buffer, contentType: string) {
 }
 
 function yearMonth(asOf: unknown): string | null {
-  if (typeof asOf === "string" && asOf.length >= 7) return asOf.slice(0, 7);
-  return null;
+  if (typeof asOf !== "string" || asOf.length < 7) return null;
+  // ISO format: "2026-05-22" → "2026-05"
+  const iso = asOf.match(/^(\d{4})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  // US format: "05/22/2026" → "2026-05"
+  const us = asOf.match(/^(\d{2})\/\d{2}\/(\d{4})/);
+  if (us) return `${us[2]}-${us[1]}`;
+  // Fallback: first 7 chars (legacy)
+  return asOf.slice(0, 7);
 }
 
 export async function POST(req: NextRequest) {

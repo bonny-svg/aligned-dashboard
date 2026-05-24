@@ -124,9 +124,9 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
 }
 
 // ─── HARDCODED FINANCIALS ────────────────────────────────────────────────────
-// Apr 2026: first full month — sourced from Sunridge Income Statement 4/30/2026.
-//   Management Fees actual reflects the $2,469 PM fee from the Sunridge invoice
-//   that was not accrued on the underlying income statement.
+// Apr 2026: first full month — sourced from Sunridge Income Statement V3 (AFIN
+// 202604), as-of 4/30/2026. All operating expenses, debt service, and reserve
+// activity are now properly accrued (V3 replaces the earlier V1 statement).
 //   "Write-Offs / Bad Debt" actual is positive due to a one-time $20,427 seller
 //   refund at acquisition (Tenant Balances Changes) plus $1,033 bad-debt recovery.
 const INCOME: Record<Month, FinRow[]> = {
@@ -141,14 +141,14 @@ const INCOME: Record<Month, FinRow[]> = {
 
 const EXPENSES: Record<Month, FinRow[]> = {
   apr: [
-    { label: "Personnel",             actual:   6_310, budget: 12_514 },
-    { label: "Management Fees",       actual:   2_469, budget:  3_038 },
-    { label: "Administrative",        actual:   4_757, budget:  1_928 },
-    { label: "Leasing",               actual:     796, budget:    697 },
-    { label: "Utilities",             actual:   5_983, budget:  3_742 },
-    { label: "Services",              actual:  10_129, budget:    357 },
-    { label: "Cleaning & Decorating", actual:       0, budget:    510 },
-    { label: "Repairs & Maintenance", actual:       0, budget:  1_615 },
+    { label: "Personnel",             actual:   8_230, budget: 12_514 },
+    { label: "Management Fees",       actual:   2_469, budget:  3_270 },
+    { label: "Administrative",        actual:   5_203, budget:  1_928 },
+    { label: "Leasing",               actual:   1_251, budget:    697 },
+    { label: "Utilities",             actual:   6_343, budget:  3_742 },
+    { label: "Services",              actual:  11_786, budget:    357 },
+    { label: "Cleaning & Decorating", actual:     409, budget:    510 },
+    { label: "Repairs & Maintenance", actual:   2_213, budget:  1_615 },
     { label: "Property Taxes",        actual:   5_600, budget:  7_833 },
     { label: "Property Insurance",    actual:   4_007, budget:  4_867 },
   ],
@@ -156,8 +156,9 @@ const EXPENSES: Record<Month, FinRow[]> = {
 
 const BELOW_LINE: Record<Month, FinRow[]> = {
   apr: [
-    { label: "Debt Service – Principal & Interest", actual:      0, budget: 25_361 },
-    { label: "Replacement Reserves",               actual:  1_327, budget:  1_276 },
+    { label: "Debt Service – Principal & Interest", actual: 33_359, budget: 25_361 },
+    { label: "Property Replacements",               actual:  3_676, budget:  1_276 },
+    { label: "Reserve Activity (Escrow)",           actual:  2_692, budget:      0 },
   ],
 };
 
@@ -559,7 +560,7 @@ export default function TowneEastPage() {
           </div>
           <div className="flex items-center gap-4 border-b border-gray-200 mb-5">
             <button className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600">Apr 2026</button>
-            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">First full month · PM fee accrual added back</span>
+            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">First full month · Sunridge V3 statement</span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
