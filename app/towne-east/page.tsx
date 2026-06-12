@@ -126,10 +126,12 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
 // ─── HARDCODED FINANCIALS ────────────────────────────────────────────────────
 // May 2026 — sourced from Sunridge Income Statement Summary (FP 202605), created
 // 6/10/2026, month ending 5/31/2026. Totals reconcile to the statement:
-// Total Revenue $89,477 · NOI $49,096 · Net Cash Flow ($129,176).
+// Total Revenue $89,477 · NOI $49,096 · statement Net Cash Flow ($129,176) incl. CapEx.
 //   "Write-Offs / Bad Debt" = the statement's "Other Rental Losses" line.
 //   Property Replacements is dominated by $134,536 of NON-RECURRING replacements
-//   (renovation capex) booked in May, which drives Net Cash Flow deeply negative.
+//   (renovation capex) booked in May. CapEx is funded from a separate reserve
+//   account, so the dashboard's headline cash flow is NOI − Debt Service and these
+//   capital items are shown only as a memo (excluded from cash flow).
 const INCOME: Record<Month, FinRow[]> = {
   may: [
     { label: "Gross Potential Rent",  actual: 106_100, budget: 105_000 },
@@ -402,15 +404,21 @@ export default function TowneEastPage() {
 
   const incomeSum    = sum(income);
   const expensesSum  = sum(expenses);
-  const belowLineSum = sum(belowLine);
+
+  // Split below-the-line into Debt Service vs. capital items. Capital items
+  // (renovation CapEx, reserve escrow) are funded from a separate reserve account
+  // and are excluded from operating cash flow — shown below as a memo.
+  const debtServiceRows = belowLine.filter((r) => r.label.toLowerCase().includes("debt service"));
+  const capitalItems    = belowLine.filter((r) => !r.label.toLowerCase().includes("debt service"));
+  const debtService     = sum(debtServiceRows);
+  const capitalSum      = sum(capitalItems);
 
   const egi = { actual: incomeSum.actual, budget: incomeSum.budget };
   const noi = { actual: egi.actual - expensesSum.actual, budget: egi.budget - expensesSum.budget };
-  const ncf = { actual: noi.actual - belowLineSum.actual, budget: noi.budget - belowLineSum.budget };
+  // Cash Flow After Debt Service = NOI − Debt Service (excludes capital items).
+  const cashFlow = { actual: noi.actual - debtService.actual, budget: noi.budget - debtService.budget };
 
-  const debtServiceActual = belowLine
-    .filter((r) => r.label.toLowerCase().includes("debt service"))
-    .reduce((s, r) => s + r.actual, 0);
+  const debtServiceActual = debtService.actual;
   const dscr         = debtServiceActual > 0 ? noi.actual / debtServiceActual : null;
   const expenseRatio = egi.actual > 0 ? (expensesSum.actual / egi.actual) * 100 : null;
 
@@ -572,10 +580,10 @@ export default function TowneEastPage() {
               <p className={cn("text-xs font-semibold mt-0.5", varColor(noi.actual - noi.budget, false))}>{varStr(noi.actual - noi.budget)}</p>
             </CardContent></Card>
             <Card className="border-gray-200"><CardContent className="pt-4 pb-3">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Net Cash Flow</p>
-              <p className={cn("text-2xl font-bold mt-1", ncf.actual >= 0 ? "text-emerald-600" : "text-red-600")}>{fmt(ncf.actual)}</p>
-              <p className="text-xs text-gray-400 mt-1.5">Bgt {fmt(ncf.budget)}</p>
-              <p className={cn("text-xs font-semibold mt-0.5", varColor(ncf.actual - ncf.budget, false))}>{varStr(ncf.actual - ncf.budget)}</p>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cash Flow After Debt Service</p>
+              <p className={cn("text-2xl font-bold mt-1", cashFlow.actual >= 0 ? "text-emerald-600" : "text-red-600")}>{fmt(cashFlow.actual)}</p>
+              <p className="text-xs text-gray-400 mt-1.5">Bgt {fmt(cashFlow.budget)}</p>
+              <p className={cn("text-xs font-semibold mt-0.5", varColor(cashFlow.actual - cashFlow.budget, false))}>{varStr(cashFlow.actual - cashFlow.budget)}</p>
             </CardContent></Card>
             <Card className="border-gray-200"><CardContent className="pt-4 pb-3">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Expense Ratio</p>
@@ -605,10 +613,16 @@ export default function TowneEastPage() {
                 {expenses.map((r) => <FinRowComponent key={r.label} row={r} isExpense />)}
                 <FinRowComponent row={{ label: "Total Operating Expenses", actual: expensesSum.actual, budget: expensesSum.budget, isSummary: true }} isExpense />
                 <SummaryRow label="Net Operating Income (NOI)" actual={noi.actual} budget={noi.budget} />
-                <SectionHeader label="Below the Line" colorClass="bg-slate-50/60 text-slate-600" />
-                {belowLine.map((r) => <FinRowComponent key={r.label} row={r} isExpense />)}
-                <FinRowComponent row={{ label: "Total Below the Line", actual: belowLineSum.actual, budget: belowLineSum.budget, isSummary: true }} isExpense />
-                <SummaryRow label="Net Cash Flow" actual={ncf.actual} budget={ncf.budget} />
+                <SectionHeader label="Debt Service" colorClass="bg-slate-50/60 text-slate-600" />
+                {debtServiceRows.map((r) => <FinRowComponent key={r.label} row={r} isExpense />)}
+                <SummaryRow label="Cash Flow After Debt Service" actual={cashFlow.actual} budget={cashFlow.budget} />
+                {capitalItems.length > 0 && (
+                  <>
+                    <SectionHeader label="Capital Items — funded from reserve / CapEx account (excluded from cash flow)" colorClass="bg-slate-50/60 text-slate-500" />
+                    {capitalItems.map((r) => <FinRowComponent key={r.label} row={r} isExpense />)}
+                    <FinRowComponent row={{ label: "Total Capital Items (memo)", actual: capitalSum.actual, budget: capitalSum.budget, isSummary: true }} isExpense />
+                  </>
+                )}
               </tbody>
             </table>
           </div></CardContent></Card>
