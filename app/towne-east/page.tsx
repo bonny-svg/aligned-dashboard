@@ -84,7 +84,7 @@ interface TowneEastExtras {
 }
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-type Month = "apr";
+type Month = "may";
 
 interface FinRow {
   label: string;
@@ -124,41 +124,42 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
 }
 
 // ─── HARDCODED FINANCIALS ────────────────────────────────────────────────────
-// Apr 2026: first full month — sourced from Sunridge Income Statement V3 (AFIN
-// 202604), as-of 4/30/2026. All operating expenses, debt service, and reserve
-// activity are now properly accrued (V3 replaces the earlier V1 statement).
-//   "Write-Offs / Bad Debt" actual is positive due to a one-time $20,427 seller
-//   refund at acquisition (Tenant Balances Changes) plus $1,033 bad-debt recovery.
+// May 2026 — sourced from Sunridge Income Statement Summary (FP 202605), created
+// 6/10/2026, month ending 5/31/2026. Totals reconcile to the statement:
+// Total Revenue $89,477 · NOI $49,096 · Net Cash Flow ($129,176).
+//   "Write-Offs / Bad Debt" = the statement's "Other Rental Losses" line.
+//   Property Replacements is dominated by $134,536 of NON-RECURRING replacements
+//   (renovation capex) booked in May, which drives Net Cash Flow deeply negative.
 const INCOME: Record<Month, FinRow[]> = {
-  apr: [
+  may: [
     { label: "Gross Potential Rent",  actual: 106_100, budget: 105_000 },
-    { label: "Loss / Gain to Leases", actual:  -1_690, budget:  -5_376 },
-    { label: "Vacancy Loss",          actual:  -7_460, budget:  -5_250 },
-    { label: "Write-Offs / Bad Debt", actual:  21_362, budget:  -1_992 },
-    { label: "Other Revenue",         actual:  14_720, budget:   8_900 },
+    { label: "Loss / Gain to Leases", actual:  -5_800, budget:  -5_223 },
+    { label: "Vacancy Loss",          actual: -16_701, budget:  -5_250 },
+    { label: "Write-Offs / Bad Debt", actual:  -3_491, budget:  -1_996 },
+    { label: "Other Revenue",         actual:   9_369, budget:   7_700 },
   ],
 };
 
 const EXPENSES: Record<Month, FinRow[]> = {
-  apr: [
-    { label: "Personnel",             actual:   8_230, budget: 12_514 },
-    { label: "Management Fees",       actual:   2_469, budget:  3_270 },
-    { label: "Administrative",        actual:   5_203, budget:  1_928 },
-    { label: "Leasing",               actual:   1_251, budget:    697 },
-    { label: "Utilities",             actual:   6_343, budget:  3_742 },
-    { label: "Services",              actual:  11_786, budget:    357 },
-    { label: "Cleaning & Decorating", actual:     409, budget:    510 },
-    { label: "Repairs & Maintenance", actual:   2_213, budget:  1_615 },
+  may: [
+    { label: "Personnel",             actual:  11_391, budget: 12_514 },
+    { label: "Management Fees",       actual:   2_469, budget:  3_238 },
+    { label: "Administrative",        actual:     538, budget:  1_928 },
+    { label: "Leasing",               actual:     230, budget:  1_326 },
+    { label: "Utilities",             actual:   7_081, budget:  3_603 },
+    { label: "Services",              actual:   8_028, budget:    122 },
+    { label: "Cleaning & Decorating", actual:     790, budget:    510 },
+    { label: "Repairs & Maintenance", actual:     247, budget:  1_615 },
     { label: "Property Taxes",        actual:   5_600, budget:  7_833 },
     { label: "Property Insurance",    actual:   4_007, budget:  4_867 },
   ],
 };
 
 const BELOW_LINE: Record<Month, FinRow[]> = {
-  apr: [
-    { label: "Debt Service – Principal & Interest", actual: 33_359, budget: 25_361 },
-    { label: "Property Replacements",               actual:  3_676, budget:  1_276 },
-    { label: "Reserve Activity (Escrow)",           actual:  2_692, budget:      0 },
+  may: [
+    { label: "Debt Service – Principal & Interest", actual:  40_182, budget: 25_361 },
+    { label: "Property Replacements",               actual: 135_398, budget:  1_545 },
+    { label: "Reserve Activity (Escrow)",           actual:   2_692, budget:      0 },
   ],
 };
 
@@ -330,7 +331,7 @@ function BudgetCard({
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TowneEastPage() {
-  const [month] = useState<Month>("apr");
+  const [month] = useState<Month>("may");
   const [metrics, setMetrics]         = useState<TowneEastMetrics | null>(null);
   const [extras, setExtras]           = useState<TowneEastExtras | null>(null);
   const [syncStatus, setSyncStatus]   = useState<"loading" | "idle" | "error">("loading");
@@ -433,7 +434,7 @@ export default function TowneEastPage() {
               <div className="flex flex-wrap items-center gap-4 mt-1 text-xs text-gray-500">
                 <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />Converse, TX</span>
                 <span className="flex items-center gap-1"><Home className="h-3.5 w-3.5" />100 units · Freddie Mac</span>
-                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Financials as of Apr 30, 2026</span>
+                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Financials as of May 31, 2026</span>
               </div>
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -556,11 +557,11 @@ export default function TowneEastPage() {
         <section id="financials" className="scroll-mt-28">
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-900">Financials — Actuals vs. Budget</h2>
-            <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-1">Updated monthly — last report: April 2026</span>
+            <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-1">Updated monthly — last report: May 2026</span>
           </div>
           <div className="flex items-center gap-4 border-b border-gray-200 mb-5">
-            <button className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600">Apr 2026</button>
-            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">First full month · Sunridge V3 statement</span>
+            <button className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600">May 2026</button>
+            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Sunridge income statement · FP 202605</span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
