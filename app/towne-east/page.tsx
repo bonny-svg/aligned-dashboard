@@ -529,7 +529,7 @@ export default function TowneEastPage() {
                           <td className="px-4 py-2.5 text-sm text-gray-700">{row.label}</td>
                           <td className="px-4 py-2.5 text-sm text-right font-medium text-red-600">{fmt(row.amount)}</td>
                           <td className="px-4 py-2.5 text-sm text-right text-gray-500">
-                            {metrics.delinquentBalance > 0 ? `${((row.amount / (metrics.priorPeriodBalance + metrics.delinquentBalance)) * 100).toFixed(1)}%` : "—"}
+                            {metrics.delinquentBalance > 0 ? `${((row.amount / metrics.delinquentBalance) * 100).toFixed(1)}%` : "—"}
                           </td>
                         </tr>
                       ));
@@ -537,7 +537,7 @@ export default function TowneEastPage() {
                   </tbody>
                   <tfoot className="bg-gray-800"><tr>
                     <td className="px-4 py-2.5 text-sm font-bold text-white">Total Delinquent</td>
-                    <td className="px-4 py-2.5 text-sm text-right font-bold text-red-400">{fmt(metrics.priorPeriodBalance + metrics.delinquentBalance)}</td>
+                    <td className="px-4 py-2.5 text-sm text-right font-bold text-red-400">{fmt(metrics.delinquentBalance)}</td>
                     <td className="px-4 py-2.5 text-sm text-right font-bold text-gray-300">100%</td>
                   </tr></tfoot>
                 </table>

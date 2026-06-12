@@ -305,6 +305,7 @@ function uploadTowneEastExtras(bundle) {
 function isTowneEastMMRBundle(attachments) {
   const found = {
     mmr: null, delinquency: null, delinquencyXls: null,
+    residentBalancesXls: null,  // Resident Balances by Fiscal Period XLS (authoritative collections + delinquency)
     rentRoll: null,             // Rent Roll XLS (occupancy source when sent standalone)
     leasingActivity: null, residentActivity: null,
     transactionSummary: null,   // Monthly Transaction Summary PDF (authoritative collections/delinquency)
@@ -327,6 +328,13 @@ function isTowneEastMMRBundle(attachments) {
     if (!found.rentRoll && isXls &&
         (name.includes('rent roll') || name.includes('rentroll') || name.includes('roll detail'))) {
       found.rentRoll = att; return;
+    }
+    // Resident Balances by Fiscal Period XLS — authoritative source for collections
+    // (Total Credits) + delinquency (Ending Delinquent Balance per resident). Parsed
+    // deterministically server-side, overriding the LLM. Match before delinquency/catch-all.
+    if (!found.residentBalancesXls && isXls &&
+        (name.includes('resident balance') || name.includes('fiscal period'))) {
+      found.residentBalancesXls = att; return;
     }
     if (!found.monthlyIncomeSummary && isXls &&
         (name.includes('monthly income') || name.includes('income summary'))) {
@@ -380,6 +388,7 @@ function isTowneEastMMRBundle(attachments) {
   }
   // Trigger on ANY XLS or PDF — if the email is Towne East, always run extraction
   const hasAny = found.mmr || found.rentRoll || found.delinquency || found.delinquencyXls ||
+                 found.residentBalancesXls ||
                  found.transactionSummary || found.monthlyIncomeSummary || found.cashGLDistribution ||
                  found.leasingActivity || found.residentActivity ||
                  found.unmatchedPdfs.length > 0 || found.unmatchedXls.length > 0;
@@ -681,6 +690,7 @@ function uploadTowneEastFromMMR(bundle) {
   if (bundle.transactionSummary)   presentLines.push('  ✓ Monthly Transaction Summary PDF → EXTRACT: totalCollected, totalCharged, collectionRatePct');
   if (bundle.monthlyIncomeSummary) presentLines.push('  ✓ Monthly Income Summary XLS → EXTRACT: income totals if Transaction Summary absent');
   if (bundle.cashGLDistribution)   presentLines.push('  ✓ Cash G/L Distribution XLS');
+  if (bundle.residentBalancesXls)  presentLines.push('  ✓ Resident Balances by Fiscal Period XLS → collections + delinquency recomputed deterministically server-side (you may skip those fields)');
   if (bundle.delinquencyXls)       presentLines.push('  ✓ Delinquent & Prepaid XLS → EXTRACT: delinquentBalance (Current column), topDelinquents, delinquentCount');
   if (bundle.delinquency)          presentLines.push('  ✓ Delinquent & Prepaid PDF → EXTRACT: delinquentBalance (Grand Totals "Current" column), priorPeriodBalance (Grand Totals "30 Days" column), delinquentCount, topDelinquents');
   if (bundle.leasingActivity)      presentLines.push('  ✓ Leasing Activity PDF → EXTRACT: signed leases, move-ins');
@@ -775,16 +785,25 @@ function uploadTowneEastFromMMR(bundle) {
   // The route uses sections to decide whether a zero value means "not in this email"
   // (skip it, preserve existing) vs. "we had the report and it really is zero" (write it).
   // This prevents a rent-roll-only run from zeroing out collection/delinquency data.
+  // When the Resident Balances by Fiscal Period XLS is present, send its raw bytes so
+  // the route recomputes collections + delinquency deterministically (overriding the LLM).
+  var payload = { metrics: metrics, sections: sections };
+  if (bundle.residentBalancesXls) {
+    payload.residentBalancesB64 = attachmentBase64(bundle.residentBalancesXls);
+    Logger.log('  ✓ Attaching Resident Balances XLS for deterministic collections/delinquency override');
+  }
+
   const headers = { 'Content-Type': 'application/json' };
   if (CONFIG.TOWNE_EAST_UPLOAD_KEY) headers['x-upload-key'] = CONFIG.TOWNE_EAST_UPLOAD_KEY;
   const resp = UrlFetchApp.fetch(CONFIG.DASHBOARD_URL + '/api/towne-east/metrics', {
     method: 'post',
     headers: headers,
-    payload: JSON.stringify({ metrics: metrics, sections: sections }),
+    payload: JSON.stringify(payload),
     muteHttpExceptions: true,
   });
   Logger.log('  [TE MMR] Metrics upload: ' + resp.getResponseCode() +
-    ' (collections:' + sections.hasCollections + ' delinquency:' + sections.hasDelinquency + ')');
+    ' (collections:' + sections.hasCollections + ' delinquency:' + sections.hasDelinquency +
+    ' balancesXls:' + !!bundle.residentBalancesXls + ')');
   if (resp.getResponseCode() >= 300) Logger.log('  TE metrics err: ' + resp.getContentText().slice(0, 300));
   return resp.getResponseCode() < 300;
 }

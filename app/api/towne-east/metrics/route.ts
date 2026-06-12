@@ -16,11 +16,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { put, list } from "@vercel/blob";
+import { parseResidentBalances } from "@/lib/grove-parsers";
+import { computeBalanceMetrics } from "@/lib/towne-east-metrics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const METRICS_PATH = "towne-east/latest/metrics.json";
+const METRICS_PATH  = "towne-east/latest/metrics.json";
+const BALANCES_PATH = "towne-east/latest/resident-balances.xls";
 
 async function putAdaptive(path: string, body: Buffer, contentType: string) {
   const base = { addRandomSuffix: false, allowOverwrite: true, contentType };
@@ -61,16 +64,50 @@ export async function POST(req: NextRequest) {
 
   let metrics: unknown;
   let sections: { hasCollections?: boolean; hasDelinquency?: boolean; hasOccupancy?: boolean; hasLeasing?: boolean } = {};
+  let residentBalancesB64: string | undefined;
 
   try {
-    const body = await req.json() as { metrics?: unknown; sections?: typeof sections };
+    const body = await req.json() as { metrics?: unknown; sections?: typeof sections; residentBalancesB64?: string };
     metrics  = body.metrics;
     sections = body.sections ?? {};
+    residentBalancesB64 = typeof body.residentBalancesB64 === "string" ? body.residentBalancesB64 : undefined;
     if (!metrics || typeof metrics !== "object") {
       return NextResponse.json({ error: "Body must be { metrics: {...} }" }, { status: 400 });
     }
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  // ── Deterministic override: when the Resident Balances XLS is attached, parse it
+  // and recompute collections + delinquency from source. These values are exact and
+  // replace whatever the LLM extraction produced, so the merge below always writes them.
+  let balancesXlsBuffer: Buffer | null = null;
+  if (residentBalancesB64) {
+    try {
+      balancesXlsBuffer = Buffer.from(residentBalancesB64, "base64");
+      const ab = balancesXlsBuffer.buffer.slice(
+        balancesXlsBuffer.byteOffset,
+        balancesXlsBuffer.byteOffset + balancesXlsBuffer.byteLength
+      ) as ArrayBuffer;
+      const balances = parseResidentBalances(ab);
+      if (balances.length > 0) {
+        const bm = computeBalanceMetrics(balances);
+        Object.assign(metrics as Record<string, unknown>, bm);
+        // Force these sections to write even if a value is legitimately 0.
+        sections.hasCollections = true;
+        sections.hasDelinquency = true;
+        console.log(
+          `[towne-east/metrics] Deterministic balances override: ${balances.length} residents, ` +
+          `collected=$${bm.totalCollected.toFixed(0)} delinquent=$${bm.delinquentBalance.toFixed(0)} (${bm.delinquentCount} units)`
+        );
+      } else {
+        console.warn("[towne-east/metrics] residentBalancesB64 parsed to 0 rows — keeping LLM values");
+        balancesXlsBuffer = null;
+      }
+    } catch (err) {
+      console.warn("[towne-east/metrics] Failed to parse residentBalancesB64:", err instanceof Error ? err.message : err);
+      balancesXlsBuffer = null;
+    }
   }
 
   try {
@@ -161,8 +198,13 @@ export async function POST(req: NextRequest) {
 
     const uploadedAt = new Date().toISOString();
     const payload    = JSON.stringify({ uploadedAt, metrics: merged });
-    await putAdaptive(METRICS_PATH, Buffer.from(payload), "application/json");
-    return NextResponse.json({ uploadedAt, source: "mmr-pdf", newMonth });
+    await Promise.all([
+      putAdaptive(METRICS_PATH, Buffer.from(payload), "application/json"),
+      balancesXlsBuffer
+        ? putAdaptive(BALANCES_PATH, balancesXlsBuffer, "application/vnd.ms-excel")
+        : Promise.resolve(),
+    ]);
+    return NextResponse.json({ uploadedAt, source: "mmr-pdf", newMonth, balancesOverride: !!balancesXlsBuffer });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Blob write failed." },

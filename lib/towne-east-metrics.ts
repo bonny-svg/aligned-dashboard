@@ -60,6 +60,55 @@ export interface TowneEastMetrics {
   notStartedCount: number;
 }
 
+// ─── Collections + Delinquency (deterministic, from Resident Balances) ───────
+// Pulled out as a standalone function so the /api/towne-east/metrics route can
+// recompute these fields directly from the source XLS and override whatever the
+// email agent's LLM extraction produced. This is the single source of truth.
+export interface BalanceMetrics {
+  totalCharged: number;
+  totalCollected: number;
+  collectionRatePct: number;
+  delinquentBalance: number;
+  priorPeriodBalance: number;
+  newDelinquencyThisPeriod: number;
+  delinquentCount: number;
+  topDelinquents: { unit: string; name: string; amount: number }[];
+}
+
+export function computeBalanceMetrics(balances: ResidentBalance[]): BalanceMetrics {
+  // "Total Credits" column = payments + credits applied this period (collections).
+  // Charged = lease charges billed to current residents this period.
+  const currentResidents = balances.filter((b) => b.status === "Current resident");
+  const totalCharged   = currentResidents.reduce((s, b) => s + b.leaseCharges, 0);
+  const totalCollected = balances.reduce((s, b) => s + b.totalCredits, 0);
+  const collectionRatePct = totalCharged > 0 ? (totalCollected / totalCharged) * 100 : 0;
+
+  // Only count current residents — exclude former, past, evicted tenants who still carry a balance
+  const delinquents = balances.filter(
+    (b) => b.endingDelinquent > 0 && /current/i.test(b.status)
+  );
+  const delinquentBalance        = delinquents.reduce((s, b) => s + b.endingDelinquent, 0);
+  const priorPeriodBalance       = delinquents.reduce((s, b) => s + b.beginningDelinquent, 0);
+  const newDelinquencyThisPeriod = Math.max(0, delinquentBalance - priorPeriodBalance);
+  const delinquentCount          = delinquents.length;
+
+  const topDelinquents = [...delinquents]
+    .sort((a, b) => b.endingDelinquent - a.endingDelinquent)
+    .slice(0, 8)
+    .map((b) => ({ unit: b.unit, name: b.residentName, amount: b.endingDelinquent }));
+
+  return {
+    totalCharged,
+    totalCollected,
+    collectionRatePct,
+    delinquentBalance,
+    priorPeriodBalance,
+    newDelinquencyThisPeriod,
+    delinquentCount,
+    topDelinquents,
+  };
+}
+
 export function computeTowneEastMetrics(
   rentRoll: RentRollUnit[],
   availability: AvailabilityUnit[],
@@ -83,25 +132,12 @@ export function computeTowneEastMetrics(
     .reduce((s, u) => s + u.leaseRent, 0);
   const economicOccupancyPct = gpr > 0 ? (totalLeaseRent / gpr) * 100 : 0;
 
-  // ── Collections ──────────────────────────────────────────────────────────
-  const currentResidents = balances.filter((b) => b.status === "Current resident");
-  const totalCharged   = currentResidents.reduce((s, b) => s + b.leaseCharges, 0);
-  const totalCollected = balances.reduce((s, b) => s + b.totalCredits, 0);
-  const collectionRatePct = totalCharged > 0 ? (totalCollected / totalCharged) * 100 : 0;
-
-  // Only count current residents — exclude former, past, evicted tenants who still carry a balance
-  const delinquents = balances.filter(
-    (b) => b.endingDelinquent > 0 && /current/i.test(b.status)
-  );
-  const delinquentBalance        = delinquents.reduce((s, b) => s + b.endingDelinquent, 0);
-  const priorPeriodBalance       = delinquents.reduce((s, b) => s + b.beginningDelinquent, 0);
-  const newDelinquencyThisPeriod = Math.max(0, delinquentBalance - priorPeriodBalance);
-  const delinquentCount          = delinquents.length;
-
-  const topDelinquents = [...delinquents]
-    .sort((a, b) => b.endingDelinquent - a.endingDelinquent)
-    .slice(0, 8)
-    .map((b) => ({ unit: b.unit, name: b.residentName, amount: b.endingDelinquent }));
+  // ── Collections + Delinquency (deterministic, shared with metrics route) ───
+  const {
+    totalCharged, totalCollected, collectionRatePct,
+    delinquentBalance, priorPeriodBalance, newDelinquencyThisPeriod,
+    delinquentCount, topDelinquents,
+  } = computeBalanceMetrics(balances);
 
   // ── Leasing ──────────────────────────────────────────────────────────────
   const now = new Date();
