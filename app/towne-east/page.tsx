@@ -505,10 +505,10 @@ export default function TowneEastPage() {
                 />
                 <BudgetCard
                   label="Economic Occupancy"
-                  actual={metrics.totalLeaseRent > 0 ? (metrics.totalLeaseRent / budget.gpr) * 100 : metrics.economicOccupancyPct}
+                  actual={metrics.totalCollected > 0 && metrics.gpr > 0 ? (metrics.totalCollected / metrics.gpr) * 100 : metrics.economicOccupancyPct}
                   budget={budget.econOcc}
                   formatVal={fmtPct}
-                  sub={`${fmt(metrics.totalLeaseRent)} lease rent / ${fmt(budget.gpr)} GPR`}
+                  sub={`${fmt(metrics.totalCollected)} collected / ${fmt(metrics.gpr || budget.gpr)} GPR`}
                 />
                 <BudgetCard
                   label="Delinquent Balance"
