@@ -84,7 +84,7 @@ interface TowneEastExtras {
 }
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-type Month = "may";
+type Month = "jun";
 
 interface FinRow {
   label: string;
@@ -124,44 +124,43 @@ function sum(rows: FinRow[]): { actual: number; budget: number } {
 }
 
 // ─── HARDCODED FINANCIALS ────────────────────────────────────────────────────
-// May 2026 — sourced from Sunridge Income Statement Summary (FP 202605), created
-// 6/10/2026, month ending 5/31/2026. Totals reconcile to the statement:
-// Total Revenue $89,477 · NOI $49,096 · statement Net Cash Flow ($129,176) incl. CapEx.
+// June 2026 — sourced from Sunridge Income Statement Summary (FP 202606), created
+// 7/10/2026, month ending 6/30/2026. Totals reconcile to the statement:
+// Total Revenue $75,506 · NOI $25,377 · statement Net Cash Flow ($28,626) incl. CapEx.
 //   "Write-Offs / Bad Debt" = the statement's "Other Rental Losses" line.
-//   Property Replacements is dominated by $134,536 of NON-RECURRING replacements
-//   (renovation capex) booked in May. CapEx is funded from a separate reserve
-//   account, so the dashboard's headline cash flow is NOI − Debt Service and these
+//   CapEx (Property Replacements) + reserve escrow are funded from a separate
+//   account, so the headline cash flow is NOI − Debt Service (−$14.8K) and these
 //   capital items are shown only as a memo (excluded from cash flow).
 const INCOME: Record<Month, FinRow[]> = {
-  may: [
-    { label: "Gross Potential Rent",  actual: 106_100, budget: 105_000 },
-    { label: "Loss / Gain to Leases", actual:  -5_800, budget:  -5_223 },
-    { label: "Vacancy Loss",          actual: -16_701, budget:  -5_250 },
-    { label: "Write-Offs / Bad Debt", actual:  -3_491, budget:  -1_996 },
-    { label: "Other Revenue",         actual:   9_369, budget:   7_700 },
+  jun: [
+    { label: "Gross Potential Rent",  actual: 104_976, budget: 107_000 },
+    { label: "Loss / Gain to Leases", actual:  -1_920, budget:  -6_908 },
+    { label: "Vacancy Loss",          actual: -18_787, budget:  -5_350 },
+    { label: "Write-Offs / Bad Debt", actual: -15_192, budget:  -2_002 },
+    { label: "Other Revenue",         actual:   6_428, budget:   7_700 },
   ],
 };
 
 const EXPENSES: Record<Month, FinRow[]> = {
-  may: [
-    { label: "Personnel",             actual:  11_391, budget: 12_514 },
-    { label: "Management Fees",       actual:   2_469, budget:  3_238 },
-    { label: "Administrative",        actual:     538, budget:  1_928 },
-    { label: "Leasing",               actual:     230, budget:  1_326 },
-    { label: "Utilities",             actual:   7_081, budget:  3_603 },
-    { label: "Services",              actual:   8_028, budget:    122 },
-    { label: "Cleaning & Decorating", actual:     790, budget:    510 },
-    { label: "Repairs & Maintenance", actual:     247, budget:  1_615 },
+  jun: [
+    { label: "Personnel",             actual:  17_000, budget: 12_514 },
+    { label: "Management Fees",       actual:   2_464, budget:  3_245 },
+    { label: "Administrative",        actual:     429, budget:  1_834 },
+    { label: "Leasing",               actual:   3_192, budget:  1_267 },
+    { label: "Utilities",             actual:   8_797, budget:  3_157 },
+    { label: "Services",              actual:   6_172, budget:    416 },
+    { label: "Cleaning & Decorating", actual:   1_745, budget:    975 },
+    { label: "Repairs & Maintenance", actual:     724, budget:  2_615 },
     { label: "Property Taxes",        actual:   5_600, budget:  7_833 },
     { label: "Property Insurance",    actual:   4_007, budget:  4_867 },
   ],
 };
 
 const BELOW_LINE: Record<Month, FinRow[]> = {
-  may: [
-    { label: "Debt Service – Principal & Interest", actual:  40_182, budget: 25_361 },
-    { label: "Property Replacements",               actual: 135_398, budget:  1_545 },
-    { label: "Reserve Activity (Escrow)",           actual:   2_692, budget:      0 },
+  jun: [
+    { label: "Debt Service – Principal & Interest", actual: 40_182, budget: 25_361 },
+    { label: "Property Replacements",               actual: 11_129, budget:  2_812 },
+    { label: "Reserve Activity (Escrow)",           actual:  2_692, budget:      0 },
   ],
 };
 
@@ -333,7 +332,7 @@ function BudgetCard({
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TowneEastPage() {
-  const [month] = useState<Month>("may");
+  const [month] = useState<Month>("jun");
   const [metrics, setMetrics]         = useState<TowneEastMetrics | null>(null);
   const [extras, setExtras]           = useState<TowneEastExtras | null>(null);
   const [syncStatus, setSyncStatus]   = useState<"loading" | "idle" | "error">("loading");
@@ -442,7 +441,7 @@ export default function TowneEastPage() {
               <div className="flex flex-wrap items-center gap-4 mt-1 text-xs text-gray-500">
                 <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />Converse, TX</span>
                 <span className="flex items-center gap-1"><Home className="h-3.5 w-3.5" />100 units · Freddie Mac</span>
-                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Financials as of May 31, 2026</span>
+                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Financials as of June 30, 2026</span>
               </div>
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -565,11 +564,11 @@ export default function TowneEastPage() {
         <section id="financials" className="scroll-mt-28">
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-900">Financials — Actuals vs. Budget</h2>
-            <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-1">Updated monthly — last report: May 2026</span>
+            <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-1">Updated monthly — last report: June 2026</span>
           </div>
           <div className="flex items-center gap-4 border-b border-gray-200 mb-5">
-            <button className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600">May 2026</button>
-            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Sunridge income statement · FP 202605</span>
+            <button className="px-4 py-2 text-sm font-medium border-b-2 -mb-px border-blue-600 text-blue-600">June 2026</button>
+            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">Sunridge income statement · FP 202606</span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
