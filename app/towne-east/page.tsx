@@ -493,7 +493,7 @@ export default function TowneEastPage() {
                   actual={metrics.physicalOccupancyPct}
                   budget={budget.physOcc}
                   formatVal={fmtPct}
-                  sub={`${metrics.occupiedCount + metrics.occupiedNTVCount} / 100 units`}
+                  sub={`${metrics.occupiedCount} / 100 occupied · ${metrics.occupiedNTVCount} on notice`}
                 />
                 <BudgetCard
                   label="Collected MTD"
