@@ -117,7 +117,10 @@ export async function POST(req: NextRequest) {
       const { blobs } = await list({ prefix: "towne-east/latest/" });
       const blob = blobs.find((b) => b.pathname === METRICS_PATH);
       if (blob) {
-        const res = await fetch(blob.url, {
+        // Bust the immutable CDN cache on overwrite (uploadedAt changes each write),
+        // otherwise the merge reads stale metrics and re-writes old values.
+        const bust = new Date(blob.uploadedAt).getTime();
+        const res = await fetch(`${blob.url}?ts=${bust}`, {
           headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
           cache: "no-store",
         });

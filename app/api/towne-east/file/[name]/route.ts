@@ -36,7 +36,11 @@ export async function GET(
       return NextResponse.json({ error: "File not found in Blob store." }, { status: 404 });
     }
 
-    const upstream = await fetch(blob.url, {
+    // Vercel Blob serves public URLs with a long immutable cache, so overwriting a
+    // blob at the same path returns stale bytes from the CDN. The blob's uploadedAt
+    // changes on every write, so appending it as a query key busts the edge cache.
+    const bust = new Date(blob.uploadedAt).getTime();
+    const upstream = await fetch(`${blob.url}?ts=${bust}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
     });
