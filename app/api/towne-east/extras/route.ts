@@ -210,7 +210,8 @@ export async function POST(req: NextRequest) {
       const { blobs } = await list({ prefix: "towne-east/latest/" });
       const blob = blobs.find((b) => b.pathname === EXTRAS_PATH);
       if (blob) {
-        const res = await fetch(blob.url, {
+        const bust = new Date(blob.uploadedAt).getTime();
+        const res = await fetch(`${blob.url}?ts=${bust}`, {
           headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
           cache: "no-store",
         });
@@ -249,7 +250,9 @@ export async function GET() {
     const blob = blobs.find((b) => b.pathname === EXTRAS_PATH);
     if (!blob) return NextResponse.json({ extras: null, configured: true });
 
-    const res = await fetch(blob.url, {
+    // Bust the immutable Blob CDN cache on overwrite (see file/metrics route).
+    const bust = new Date(blob.uploadedAt).getTime();
+    const res = await fetch(`${blob.url}?ts=${bust}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
     });
