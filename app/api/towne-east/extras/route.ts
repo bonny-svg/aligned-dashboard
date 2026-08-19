@@ -169,6 +169,7 @@ export async function POST(req: NextRequest) {
   let delinquencyText: string | null = null;
   let maintenanceText: string | null = null;
   let leasingBuf:      Buffer | null = null;
+  let leasingObj:      unknown       = null;
   let renovationData:  unknown       = null;
 
   try {
@@ -179,8 +180,12 @@ export async function POST(req: NextRequest) {
         delinquencyText = Buffer.from(json.delinquency.base64, "base64").toString("utf-8");
       if (isJsonFile(json.maintenance))
         maintenanceText = Buffer.from(json.maintenance.base64, "base64").toString("utf-8");
+      // leasing accepts either a base64 Excel export, or a pre-computed object
+      // (the leasing platform only exports a screenshot, so we transcribe the funnel).
       if (isJsonFile(json.leasing))
         leasingBuf = Buffer.from(json.leasing.base64, "base64");
+      else if (json.leasing && typeof json.leasing === "object")
+        leasingObj = json.leasing;
       if (json.renovation && typeof json.renovation === "object")
         renovationData = json.renovation;
     } else {
@@ -199,7 +204,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!delinquencyText && !maintenanceText && !leasingBuf && !renovationData) {
+  if (!delinquencyText && !maintenanceText && !leasingBuf && !leasingObj && !renovationData) {
     return NextResponse.json({ error: "At least one of delinquency, maintenance, leasing, or renovation is required." }, { status: 400 });
   }
 
@@ -226,6 +231,7 @@ export async function POST(req: NextRequest) {
     if (delinquencyText) extras.delinquency = parseDelinquency(delinquencyText);
     if (maintenanceText) extras.maintenance  = parseMaintenance(maintenanceText);
     if (leasingBuf)      extras.leasing      = parseLeasing(leasingBuf);
+    else if (leasingObj) extras.leasing      = leasingObj;
     if (renovationData)  extras.renovation   = renovationData;
 
     const uploadedAt = new Date().toISOString();
